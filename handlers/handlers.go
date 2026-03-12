@@ -109,9 +109,12 @@ func (h *Handler) Configure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pkg := entry.PrimaryPackage()
+
 	data := map[string]any{
 		"ActivePage":      "configure",
 		"Server":          entry,
+		"Package":         pkg,
 		"Namespace":       h.targetNamespace,
 		"ServiceAccounts": serviceAccounts,
 	}
@@ -148,6 +151,8 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pkg := entry.PrimaryPackage()
+
 	instanceName := r.FormValue("instance-name")
 	namespace := r.FormValue("namespace")
 	if namespace == "" {
@@ -156,58 +161,91 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	image := r.FormValue("image")
 	port := r.FormValue("port")
 
+	var defaultPort int32
+	if k8s := entry.K8s(); k8s != nil {
+		defaultPort = k8s.DefaultPort
+	}
+
 	ctx := r.Context()
 
 	spec := map[string]any{
 		"image": image,
-		"port":  parsePort(port, entry.DefaultPort),
+		"port":  parsePort(port, defaultPort),
 	}
 
-	args := append([]string{}, entry.Args...)
+	// Collect fixed args from packageArguments with a preset value
+	var args []string
+	if pkg != nil {
+		for _, arg := range pkg.PackageArguments {
+			if arg.Value != "" {
+				if arg.Type == "named" && arg.Name != "" {
+					args = append(args, arg.Name, arg.Value)
+				} else {
+					args = append(args, arg.Value)
+				}
+			}
+		}
+	}
+
 	var envVars []any
 	var secretCreated bool
 	secretName := instanceName + "-credentials"
 	secretData := map[string]string{}
 
-	for _, cred := range entry.Credentials {
-		switch cred.Type {
-		case "env":
-			value := r.FormValue("cred-" + cred.EnvName)
+	// Environment variables
+	if pkg != nil {
+		for _, ev := range pkg.EnvironmentVariables {
+			value := r.FormValue("env-" + ev.Name)
 			if value == "" {
 				continue
 			}
-			secretData[sanitizeKey(cred.EnvName)] = value
+			secretData[sanitizeKey(ev.Name)] = value
 			envVars = append(envVars, map[string]any{
-				"name": cred.EnvName,
+				"name": ev.Name,
 				"valueFrom": map[string]any{
 					"secretKeyRef": map[string]any{
 						"name": secretName,
-						"key":  sanitizeKey(cred.EnvName),
+						"key":  sanitizeKey(ev.Name),
 					},
 				},
 			})
 			secretCreated = true
+		}
+	}
 
-		case "file":
-			fileContent := r.FormValue("cred-file-" + cred.SecretKey)
+	// Secret file mounts
+	if k8s := entry.K8s(); k8s != nil {
+		for _, sm := range k8s.SecretMounts {
+			fileContent := r.FormValue("file-" + sm.SecretKey)
 			if fileContent == "" {
 				continue
 			}
-			fileSecretName := instanceName + "-" + strings.TrimSuffix(cred.SecretKey, ".pem") + "-secret"
+			fileSecretName := instanceName + "-" + strings.TrimSuffix(sm.SecretKey, ".pem") + "-secret"
 			if err := h.createSecret(ctx, namespace, fileSecretName, map[string]string{
-				cred.SecretKey: fileContent,
+				sm.SecretKey: fileContent,
 			}); err != nil {
 				http.Error(w, fmt.Sprintf("failed to create secret: %v", err), http.StatusInternalServerError)
 				return
 			}
 			spec["secretRef"] = map[string]any{"name": fileSecretName}
-			spec["secretMountPath"] = cred.MountPath
-			spec["secretKey"] = cred.SecretKey
+			spec["secretMountPath"] = sm.MountPath
+			spec["secretKey"] = sm.SecretKey
+		}
+	}
 
-		case "arg":
-			value := r.FormValue("arg-" + cred.Flag)
+	// User-provided package arguments
+	if pkg != nil {
+		for _, arg := range pkg.PackageArguments {
+			if arg.Value != "" {
+				continue // already handled above
+			}
+			value := r.FormValue("arg-" + arg.Name)
 			if value != "" {
-				args = append(args, cred.Flag, value)
+				if arg.Type == "named" && arg.Name != "" {
+					args = append(args, arg.Name, value)
+				} else {
+					args = append(args, value)
+				}
 			}
 		}
 	}
@@ -237,10 +275,10 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	if configMapRef != "" {
 		// Use existing ConfigMap
 		spec["configMapRef"] = map[string]any{"name": configMapRef}
-	} else if configMapContent != "" && len(entry.ConfigMaps) > 0 {
+	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
 		// Create a new ConfigMap from the provided content
 		cmName := instanceName + "-config"
-		fileName := entry.ConfigMaps[0].FileName
+		fileName := entry.K8s().ConfigMaps[0].FileName
 		if fileName == "" {
 			fileName = "config"
 		}
@@ -432,6 +470,8 @@ func sanitizeKey(s string) string {
 }
 
 func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace string) string {
+	pkg := entry.PrimaryPackage()
+
 	instanceName := r.FormValue("instance-name")
 	if instanceName == "" {
 		instanceName = entry.Name
@@ -441,12 +481,12 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 		ns = namespace
 	}
 	image := r.FormValue("image")
-	if image == "" {
-		image = entry.Image
+	if image == "" && pkg != nil {
+		image = pkg.Identifier
 	}
 	port := r.FormValue("port")
-	if port == "" {
-		port = fmt.Sprintf("%d", entry.DefaultPort)
+	if port == "" && entry.K8s() != nil {
+		port = fmt.Sprintf("%d", entry.K8s().DefaultPort)
 	}
 
 	var b strings.Builder
@@ -471,18 +511,30 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 	if configMapRef != "" {
 		b.WriteString("  configMapRef:\n")
 		fmt.Fprintf(&b, "    name: %s\n", configMapRef)
-	} else if configMapContent != "" && len(entry.ConfigMaps) > 0 {
+	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
 		b.WriteString("  configMapRef:\n")
 		fmt.Fprintf(&b, "    name: %s-config\n", instanceName)
 	}
 
-	// Args
-	args := append([]string{}, entry.Args...)
-	for _, cred := range entry.Credentials {
-		if cred.Type == "arg" {
-			value := r.FormValue("arg-" + cred.Flag)
-			if value != "" {
-				args = append(args, cred.Flag, value)
+	// Args: fixed args from package + user-provided args
+	var args []string
+	if pkg != nil {
+		for _, arg := range pkg.PackageArguments {
+			if arg.Value != "" {
+				if arg.Type == "named" && arg.Name != "" {
+					args = append(args, arg.Name, arg.Value)
+				} else {
+					args = append(args, arg.Value)
+				}
+			} else {
+				value := r.FormValue("arg-" + arg.Name)
+				if value != "" {
+					if arg.Type == "named" && arg.Name != "" {
+						args = append(args, arg.Name, value)
+					} else {
+						args = append(args, value)
+					}
+				}
 			}
 		}
 	}
@@ -493,36 +545,36 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 		}
 	}
 
-	// File credentials
-	for _, cred := range entry.Credentials {
-		if cred.Type == "file" {
-			content := r.FormValue("cred-file-" + cred.SecretKey)
+	// Secret file mounts
+	if k8s := entry.K8s(); k8s != nil {
+		for _, sm := range k8s.SecretMounts {
+			content := r.FormValue("file-" + sm.SecretKey)
 			if content != "" {
-				secretName := instanceName + "-" + strings.TrimSuffix(cred.SecretKey, ".pem") + "-secret"
+				secretName := instanceName + "-" + strings.TrimSuffix(sm.SecretKey, ".pem") + "-secret"
 				b.WriteString("  secretRef:\n")
 				fmt.Fprintf(&b, "    name: %s\n", secretName)
-				fmt.Fprintf(&b, "  secretMountPath: %s\n", cred.MountPath)
-				fmt.Fprintf(&b, "  secretKey: %s\n", cred.SecretKey)
+				fmt.Fprintf(&b, "  secretMountPath: %s\n", sm.MountPath)
+				fmt.Fprintf(&b, "  secretKey: %s\n", sm.SecretKey)
 			}
 		}
 	}
 
-	// Env credentials
-	var hasEnvCreds bool
-	for _, cred := range entry.Credentials {
-		if cred.Type == "env" {
-			value := r.FormValue("cred-" + cred.EnvName)
+	// Env variables
+	var hasEnvVars bool
+	if pkg != nil {
+		for _, ev := range pkg.EnvironmentVariables {
+			value := r.FormValue("env-" + ev.Name)
 			if value != "" {
-				if !hasEnvCreds {
+				if !hasEnvVars {
 					b.WriteString("  env:\n")
-					hasEnvCreds = true
+					hasEnvVars = true
 				}
 				credSecretName := instanceName + "-credentials"
-				fmt.Fprintf(&b, "    - name: %s\n", cred.EnvName)
+				fmt.Fprintf(&b, "    - name: %s\n", ev.Name)
 				b.WriteString("      valueFrom:\n")
 				b.WriteString("        secretKeyRef:\n")
 				fmt.Fprintf(&b, "          name: %s\n", credSecretName)
-				fmt.Fprintf(&b, "          key: %s\n", sanitizeKey(cred.EnvName))
+				fmt.Fprintf(&b, "          key: %s\n", sanitizeKey(ev.Name))
 			}
 		}
 	}

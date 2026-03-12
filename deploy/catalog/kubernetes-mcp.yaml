@@ -9,20 +9,32 @@ data:
   server.json: |
     {
       "name": "kubernetes-mcp-server",
+      "title": "Kubernetes",
       "description": "Query and manage Kubernetes resources via MCP",
-      "image": "quay.io/containers/kubernetes_mcp_server:latest",
-      "defaultPort": 8080,
-      "transport": "streamable-http",
-      "credentials": [],
-      "needsServiceAccount": true,
-      "serviceAccountHint": "Needs a ServiceAccount bound to the 'view' ClusterRole for read-only access",
-      "configMaps": [
-        {
-          "label": "Server Configuration (config.toml)",
-          "description": "TOML config file mounted at /etc/mcp-config/config.toml",
-          "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
-          "fileName": "config.toml"
-        }
-      ],
-      "args": ["--config", "/etc/mcp-config/config.toml"]
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "quay.io/containers/kubernetes_mcp_server:latest",
+        "transport": { "type": "streamable-http" },
+        "packageArguments": [
+          {
+            "type": "named",
+            "name": "--config",
+            "value": "/etc/mcp-config/config.toml"
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 8080,
+        "needsServiceAccount": true,
+        "serviceAccountHint": "Needs a ServiceAccount bound to the 'view' ClusterRole for read-only access",
+        "configMaps": [
+          {
+            "label": "Server Configuration (config.toml)",
+            "description": "TOML config file mounted at /etc/mcp-config/config.toml",
+            "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
+            "fileName": "config.toml"
+          }
+        ]
+      } }
     }

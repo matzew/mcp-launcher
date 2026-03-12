@@ -9,26 +9,33 @@ data:
   server.json: |
     {
       "name": "insights-mcp-server",
+      "title": "Red Hat Insights & Lightspeed",
       "description": "Red Hat Insights and Lightspeed integration via MCP",
-      "image": "ghcr.io/redhatinsights/red-hat-lightspeed-mcp:latest",
-      "defaultPort": 8000,
-      "transport": "streamable-http",
-      "credentials": [
-        {
-          "type": "env",
-          "envName": "LIGHTSPEED_CLIENT_ID",
-          "label": "Service Account Client ID",
-          "description": "Create at console.redhat.com",
-          "required": true,
-          "sensitive": true
-        },
-        {
-          "type": "env",
-          "envName": "LIGHTSPEED_CLIENT_SECRET",
-          "label": "Service Account Client Secret",
-          "required": true,
-          "sensitive": true
-        }
-      ],
-      "args": ["http"]
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "ghcr.io/redhatinsights/red-hat-lightspeed-mcp:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "LIGHTSPEED_CLIENT_ID",
+            "description": "Service Account Client ID (create at console.redhat.com)",
+            "isRequired": true,
+            "isSecret": true
+          },
+          {
+            "name": "LIGHTSPEED_CLIENT_SECRET",
+            "description": "Service Account Client Secret",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ],
+        "packageArguments": [
+          {
+            "type": "positional",
+            "value": "http"
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 8000 } }
     }

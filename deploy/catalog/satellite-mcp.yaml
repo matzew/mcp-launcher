@@ -9,25 +9,32 @@ data:
   server.json: |
     {
       "name": "satellite-mcp-server",
+      "title": "Red Hat Satellite",
       "description": "Interact with Red Hat Satellite for host and content management",
-      "image": "registry.redhat.io/satellite/foreman-mcp-server-rhel9:6.18",
-      "defaultPort": 8080,
-      "transport": "streamable-http",
-      "credentials": [
-        {
-          "type": "file",
-          "label": "Satellite CA Bundle",
-          "description": "Download from https://satellite.example.com/unattended/public/foreman_raw_ca",
-          "secretKey": "ca.pem",
-          "mountPath": "/app/ca.pem",
-          "required": true
-        },
-        {
-          "type": "arg",
-          "label": "Satellite URL",
-          "flag": "--foreman-url",
-          "placeholder": "https://satellite.example.com",
-          "required": true
-        }
-      ]
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "registry.redhat.io/satellite/foreman-mcp-server-rhel9:6.18",
+        "transport": { "type": "streamable-http" },
+        "packageArguments": [
+          {
+            "type": "named",
+            "name": "--foreman-url",
+            "description": "Satellite URL",
+            "placeholder": "https://satellite.example.com",
+            "isRequired": true
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 8080,
+        "secretMounts": [
+          {
+            "secretKey": "ca.pem",
+            "mountPath": "/app/ca.pem",
+            "description": "Satellite CA Bundle (download from https://satellite.example.com/unattended/public/foreman_raw_ca)",
+            "isRequired": true
+          }
+        ]
+      } }
     }

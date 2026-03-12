@@ -9,26 +9,28 @@ data:
   server.json: |
     {
       "name": "ansible-mcp-server",
+      "title": "Ansible Automation Platform",
       "description": "Interact with Ansible Automation Platform (AAP) via MCP",
-      "image": "registry.redhat.io/ansible-automation-platform-25/aap-mcp-server-rhel9:latest",
-      "defaultPort": 3000,
-      "transport": "streamable-http",
-      "credentials": [
-        {
-          "type": "env",
-          "envName": "AAP_URL",
-          "label": "AAP Base URL",
-          "placeholder": "https://aap.example.com",
-          "required": true,
-          "sensitive": false
-        },
-        {
-          "type": "env",
-          "envName": "AAP_OAUTH_TOKEN",
-          "label": "OAuth2 Bearer Token",
-          "description": "Validated against {base-url}/api/gateway/v1/me/",
-          "required": true,
-          "sensitive": true
-        }
-      ]
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "registry.redhat.io/ansible-automation-platform-25/aap-mcp-server-rhel9:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "AAP_URL",
+            "description": "AAP Base URL",
+            "placeholder": "https://aap.example.com",
+            "isRequired": true,
+            "isSecret": false
+          },
+          {
+            "name": "AAP_OAUTH_TOKEN",
+            "description": "OAuth2 Bearer Token (validated against {base-url}/api/gateway/v1/me/)",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3000 } }
     }

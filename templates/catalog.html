@@ -13,15 +13,21 @@
 <div class="grid">
   {{ range .Servers }}
   <div class="card">
-    <h3>{{ .Name }}</h3>
+    <h3>{{ .DisplayTitle }}</h3>
     <p>{{ .Description }}</p>
     <div>
-      {{ if .NeedsServiceAccount }}<span class="badge">ServiceAccount</span>{{ end }}
-      {{ if .ConfigMaps }}<span class="badge">ConfigMap</span>{{ end }}
-      {{ if .Credentials }}<span class="badge">Credentials</span>{{ end }}
-      {{ if not .Credentials }}{{ if not .NeedsServiceAccount }}{{ if not .ConfigMaps }}
+      {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}<span class="badge">ServiceAccount</span>{{ end }}{{ end }}
+      {{ if .K8s }}{{ if .K8s.ConfigMaps }}<span class="badge">ConfigMap</span>{{ end }}{{ end }}
+      {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}<span class="badge">Credentials</span>{{ end }}{{ end }}
+      {{ if .K8s }}{{ if .K8s.SecretMounts }}<span class="badge">File Mount</span>{{ end }}{{ end }}
+      {{ $hasEnv := false }}{{ $hasSA := false }}{{ $hasCM := false }}{{ $hasSM := false }}
+      {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}{{ $hasEnv = true }}{{ end }}{{ end }}
+      {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}{{ $hasSA = true }}{{ end }}{{ end }}
+      {{ if .K8s }}{{ if .K8s.ConfigMaps }}{{ $hasCM = true }}{{ end }}{{ end }}
+      {{ if .K8s }}{{ if .K8s.SecretMounts }}{{ $hasSM = true }}{{ end }}{{ end }}
+      {{ if not $hasEnv }}{{ if not $hasSA }}{{ if not $hasCM }}{{ if not $hasSM }}
         <span class="badge badge-green">Ready to run</span>
-      {{ end }}{{ end }}{{ end }}
+      {{ end }}{{ end }}{{ end }}{{ end }}
     </div>
     <div style="margin-top: 0.75rem;">
       <a href="/configure/{{ .Name }}" class="btn btn-primary">Configure &amp; Run</a>

@@ -2,7 +2,7 @@
 <a href="/" class="back-link">&larr; Back to catalog</a>
 
 <div class="page-header" style="margin-top: 1rem;">
-  <h2>{{ .Server.Name }}</h2>
+  <h2>{{ .Server.DisplayTitle }}</h2>
   <p>{{ .Server.Description }}</p>
 </div>
 
@@ -30,18 +30,18 @@
 
       <div class="form-group">
         <label for="image">Image</label>
-        <input type="text" id="image" name="image" value="{{ .Server.Image }}">
+        <input type="text" id="image" name="image" value="{{ if .Package }}{{ .Package.Identifier }}{{ end }}">
       </div>
 
       <div class="form-group">
         <label for="port">Port</label>
-        <input type="number" id="port" name="port" value="{{ .Server.DefaultPort }}" min="1" max="65535">
+        <input type="number" id="port" name="port" value="{{ if .Server.K8s }}{{ .Server.K8s.DefaultPort }}{{ end }}" min="1" max="65535">
       </div>
 
-      {{ if .Server.NeedsServiceAccount }}
+      {{ if .Server.K8s }}{{ if .Server.K8s.NeedsServiceAccount }}
       <div class="section-header">Service Account</div>
-      {{ if .Server.ServiceAccountHint }}
-      <p class="hint" style="margin-bottom: 0.5rem;">{{ .Server.ServiceAccountHint }}</p>
+      {{ if .Server.K8s.ServiceAccountHint }}
+      <p class="hint" style="margin-bottom: 0.5rem;">{{ .Server.K8s.ServiceAccountHint }}</p>
       {{ end }}
       <div class="form-group">
         <label for="service-account">Service Account</label>
@@ -52,13 +52,13 @@
           {{ end }}
         </select>
       </div>
-      {{ end }}
+      {{ end }}{{ end }}
 
-      {{ if .Server.ConfigMaps }}
+      {{ if .Server.K8s }}{{ if .Server.K8s.ConfigMaps }}
       <div class="section-header">Configuration</div>
-      {{ range .Server.ConfigMaps }}
+      {{ range .Server.K8s.ConfigMaps }}
       <div class="form-group">
-        <label>{{ .Label }}</label>
+        <label>{{ .Label }}{{ if .IsRequired }} *{{ end }}</label>
         {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
         <textarea name="configmap-content" placeholder="Paste configuration here...">{{ .DefaultContent }}</textarea>
       </div>
@@ -67,39 +67,64 @@
         <label for="configmap-ref">Or use existing ConfigMap</label>
         <input type="text" id="configmap-ref" name="configmap-ref" placeholder="configmap-name (leave empty to create new)">
       </div>
-      {{ end }}
+      {{ end }}{{ end }}
 
-      {{ if .Server.Credentials }}
-      <div class="section-header">Credentials</div>
-      {{ range .Server.Credentials }}
-        {{ if eq .Type "env" }}
+      {{ if .Package }}{{ if .Package.EnvironmentVariables }}
+      <div class="section-header">Environment Variables</div>
+      {{ range .Package.EnvironmentVariables }}
         <div class="form-group">
-          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
+          <label>{{ .Name }}{{ if .IsRequired }} *{{ end }}</label>
           {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
-          <input type="{{ if .Sensitive }}password{{ else }}text{{ end }}"
-                 name="cred-{{ .EnvName }}"
+          {{ if .Choices }}
+          <select name="env-{{ .Name }}" {{ if .IsRequired }}required{{ end }}>
+            <option value="">-- select --</option>
+            {{ range .Choices }}
+            <option value="{{ . }}">{{ . }}</option>
+            {{ end }}
+          </select>
+          {{ else }}
+          <input type="{{ if .IsSecret }}password{{ else }}text{{ end }}"
+                 name="env-{{ .Name }}"
                  placeholder="{{ .Placeholder }}"
-                 {{ if .Required }}required{{ end }}>
+                 value="{{ .Default }}"
+                 {{ if .IsRequired }}required{{ end }}>
+          {{ end }}
         </div>
-        {{ else if eq .Type "file" }}
+      {{ end }}
+      {{ end }}{{ end }}
+
+      {{ if .Package }}{{ if .Package.PackageArguments }}
+      {{ $hasUserArgs := false }}
+      {{ range .Package.PackageArguments }}{{ if not .Value }}{{ $hasUserArgs = true }}{{ end }}{{ end }}
+      {{ if $hasUserArgs }}
+      <div class="section-header">Arguments</div>
+      {{ range .Package.PackageArguments }}
+        {{ if not .Value }}
         <div class="form-group">
-          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
+          <label>{{ if .Name }}{{ .Name }}{{ else }}Argument{{ end }}{{ if .IsRequired }} *{{ end }}</label>
           {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
-          <textarea name="cred-file-{{ .SecretKey }}"
-                    placeholder="Paste file content here..."
-                    {{ if .Required }}required{{ end }}></textarea>
-        </div>
-        {{ else if eq .Type "arg" }}
-        <div class="form-group">
-          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
-          {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
-          <input type="text" name="arg-{{ .Flag }}"
+          <input type="{{ if .IsSecret }}password{{ else }}text{{ end }}"
+                 name="arg-{{ .Name }}"
                  placeholder="{{ .Placeholder }}"
-                 {{ if .Required }}required{{ end }}>
+                 {{ if .IsRequired }}required{{ end }}>
         </div>
         {{ end }}
       {{ end }}
       {{ end }}
+      {{ end }}{{ end }}
+
+      {{ if .Server.K8s }}{{ if .Server.K8s.SecretMounts }}
+      <div class="section-header">File Mounts</div>
+      {{ range .Server.K8s.SecretMounts }}
+        <div class="form-group">
+          <label>{{ .SecretKey }}{{ if .IsRequired }} *{{ end }}</label>
+          {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
+          <textarea name="file-{{ .SecretKey }}"
+                    placeholder="Paste file content here..."
+                    {{ if .IsRequired }}required{{ end }}></textarea>
+        </div>
+      {{ end }}
+      {{ end }}{{ end }}
 
       <div class="actions">
         <button type="submit" class="btn btn-primary">Run</button>
@@ -124,8 +149,8 @@ metadata:
   name: {{ .Server.Name }}
   namespace: {{ .Namespace }}
 spec:
-  image: {{ .Server.Image }}
-  port: {{ .Server.DefaultPort }}</code></pre>
+  image: {{ if .Package }}{{ .Package.Identifier }}{{ end }}
+  port: {{ if .Server.K8s }}{{ .Server.K8s.DefaultPort }}{{ end }}</code></pre>
     </div>
   </div>
 

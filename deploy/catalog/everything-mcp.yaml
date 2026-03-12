@@ -9,9 +9,13 @@ data:
   server.json: |
     {
       "name": "everything-mcp-server",
+      "title": "Everything MCP (Test)",
       "description": "Reference MCP server for testing (echoes tools, resources, prompts)",
-      "image": "quay.io/matzew/mcp-everything:latest",
-      "defaultPort": 3001,
-      "transport": "streamable-http",
-      "credentials": []
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "quay.io/matzew/mcp-everything:latest",
+        "transport": { "type": "streamable-http" }
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3001 } }
     }
