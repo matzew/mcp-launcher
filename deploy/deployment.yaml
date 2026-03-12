@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-launcher
+  namespace: mcp-system
+  labels:
+    app: mcp-launcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-launcher
+  template:
+    metadata:
+      labels:
+        app: mcp-launcher
+    spec:
+      serviceAccountName: mcp-launcher
+      containers:
+        - name: mcp-launcher
+          image: quay.io/matzew/mcp-launcher:latest
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: CATALOG_NAMESPACE
+              value: mcp-catalog
+            - name: TARGET_NAMESPACE
+              value: default
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-launcher
+  namespace: mcp-system
+  labels:
+    app: mcp-launcher
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-launcher
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

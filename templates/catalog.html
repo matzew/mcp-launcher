@@ -1,0 +1,33 @@
+{{ define "content" }}
+<div class="page-header">
+  <h2>MCP Server Catalog</h2>
+  <p>Browse available MCP servers and deploy them to your cluster</p>
+</div>
+
+{{ if not .Servers }}
+<div class="card empty-state">
+  <p>No servers found in catalog.</p>
+  <p>Add ConfigMaps with label <code>mcp.x-k8s.io/catalog-entry=true</code> to the catalog namespace.</p>
+</div>
+{{ else }}
+<div class="grid">
+  {{ range .Servers }}
+  <div class="card">
+    <h3>{{ .Name }}</h3>
+    <p>{{ .Description }}</p>
+    <div>
+      {{ if .NeedsServiceAccount }}<span class="badge">ServiceAccount</span>{{ end }}
+      {{ if .ConfigMaps }}<span class="badge">ConfigMap</span>{{ end }}
+      {{ if .Credentials }}<span class="badge">Credentials</span>{{ end }}
+      {{ if not .Credentials }}{{ if not .NeedsServiceAccount }}{{ if not .ConfigMaps }}
+        <span class="badge badge-green">Ready to run</span>
+      {{ end }}{{ end }}{{ end }}
+    </div>
+    <div style="margin-top: 0.75rem;">
+      <a href="/configure/{{ .Name }}" class="btn btn-primary">Configure &amp; Run</a>
+    </div>
+  </div>
+  {{ end }}
+</div>
+{{ end }}
+{{ end }}

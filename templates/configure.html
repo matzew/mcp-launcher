@@ -1,0 +1,133 @@
+{{ define "content" }}
+<a href="/" class="back-link">&larr; Back to catalog</a>
+
+<div class="page-header" style="margin-top: 1rem;">
+  <h2>{{ .Server.Name }}</h2>
+  <p>{{ .Server.Description }}</p>
+</div>
+
+<div class="two-col">
+
+  <!-- Left: Configuration Form -->
+  <div>
+    <form id="configure-form" method="POST" action="/run">
+      <input type="hidden" name="catalog-name" value="{{ .Server.Name }}">
+
+      <div class="section-header">Instance</div>
+
+      <div class="form-group">
+        <label for="instance-name">Name</label>
+        <input type="text" id="instance-name" name="instance-name" value="{{ .Server.Name }}" required
+               pattern="[a-z0-9]([a-z0-9-]*[a-z0-9])?" title="Lowercase letters, numbers, and hyphens">
+      </div>
+
+      <div class="form-group">
+        <label for="namespace">Namespace</label>
+        <input type="text" id="namespace" name="namespace" value="{{ .Namespace }}">
+      </div>
+
+      <div class="section-header">Container</div>
+
+      <div class="form-group">
+        <label for="image">Image</label>
+        <input type="text" id="image" name="image" value="{{ .Server.Image }}">
+      </div>
+
+      <div class="form-group">
+        <label for="port">Port</label>
+        <input type="number" id="port" name="port" value="{{ .Server.DefaultPort }}" min="1" max="65535">
+      </div>
+
+      {{ if .Server.NeedsServiceAccount }}
+      <div class="section-header">Service Account</div>
+      {{ if .Server.ServiceAccountHint }}
+      <p class="hint" style="margin-bottom: 0.5rem;">{{ .Server.ServiceAccountHint }}</p>
+      {{ end }}
+      <div class="form-group">
+        <label for="service-account">Service Account</label>
+        <select id="service-account" name="service-account">
+          <option value="">-- select --</option>
+          {{ range .ServiceAccounts }}
+          <option value="{{ . }}">{{ . }}</option>
+          {{ end }}
+        </select>
+      </div>
+      {{ end }}
+
+      {{ if .Server.ConfigMaps }}
+      <div class="section-header">Configuration</div>
+      {{ range .Server.ConfigMaps }}
+      <div class="form-group">
+        <label>{{ .Label }}</label>
+        {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
+        <textarea name="configmap-content" placeholder="Paste configuration here...">{{ .DefaultContent }}</textarea>
+      </div>
+      {{ end }}
+      <div class="form-group">
+        <label for="configmap-ref">Or use existing ConfigMap</label>
+        <input type="text" id="configmap-ref" name="configmap-ref" placeholder="configmap-name (leave empty to create new)">
+      </div>
+      {{ end }}
+
+      {{ if .Server.Credentials }}
+      <div class="section-header">Credentials</div>
+      {{ range .Server.Credentials }}
+        {{ if eq .Type "env" }}
+        <div class="form-group">
+          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
+          {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
+          <input type="{{ if .Sensitive }}password{{ else }}text{{ end }}"
+                 name="cred-{{ .EnvName }}"
+                 placeholder="{{ .Placeholder }}"
+                 {{ if .Required }}required{{ end }}>
+        </div>
+        {{ else if eq .Type "file" }}
+        <div class="form-group">
+          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
+          {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
+          <textarea name="cred-file-{{ .SecretKey }}"
+                    placeholder="Paste file content here..."
+                    {{ if .Required }}required{{ end }}></textarea>
+        </div>
+        {{ else if eq .Type "arg" }}
+        <div class="form-group">
+          <label>{{ .Label }}{{ if .Required }} *{{ end }}</label>
+          {{ if .Description }}<p class="hint">{{ .Description }}</p>{{ end }}
+          <input type="text" name="arg-{{ .Flag }}"
+                 placeholder="{{ .Placeholder }}"
+                 {{ if .Required }}required{{ end }}>
+        </div>
+        {{ end }}
+      {{ end }}
+      {{ end }}
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Run</button>
+        <button type="button" class="btn btn-outline"
+                onclick="let t=document.getElementById('yaml-output').textContent; navigator.clipboard.writeText(t); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy YAML',1500)">
+          Copy YAML
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Right: Live YAML Preview -->
+  <div>
+    <div class="section-header">YAML Preview</div>
+    <div class="yaml-preview"
+         hx-get="/preview/{{ .Server.Name }}"
+         hx-trigger="input from:#configure-form delay:300ms"
+         hx-include="#configure-form">
+      <pre><code id="yaml-output">apiVersion: mcp.x-k8s.io/v1alpha1
+kind: MCPServer
+metadata:
+  name: {{ .Server.Name }}
+  namespace: {{ .Namespace }}
+spec:
+  image: {{ .Server.Image }}
+  port: {{ .Server.DefaultPort }}</code></pre>
+    </div>
+  </div>
+
+</div>
+{{ end }}

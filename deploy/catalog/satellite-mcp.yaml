@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-satellite-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "satellite-mcp-server",
+      "description": "Interact with Red Hat Satellite for host and content management",
+      "image": "registry.redhat.io/satellite/foreman-mcp-server-rhel9:6.18",
+      "defaultPort": 8080,
+      "transport": "streamable-http",
+      "credentials": [
+        {
+          "type": "file",
+          "label": "Satellite CA Bundle",
+          "description": "Download from https://satellite.example.com/unattended/public/foreman_raw_ca",
+          "secretKey": "ca.pem",
+          "mountPath": "/app/ca.pem",
+          "required": true
+        },
+        {
+          "type": "arg",
+          "label": "Satellite URL",
+          "flag": "--foreman-url",
+          "placeholder": "https://satellite.example.com",
+          "required": true
+        }
+      ]
+    }

@@ -1,0 +1,13 @@
+{{ define "content" }}
+<div class="page-header">
+  <h2>Running Servers</h2>
+  <p>MCPServer instances in namespace <strong>{{ .Namespace }}</strong></p>
+</div>
+
+<div id="server-list"
+     hx-get="/running"
+     hx-trigger="every 5s"
+     hx-swap="innerHTML">
+  {{ template "running-list" . }}
+</div>
+{{ end }}
