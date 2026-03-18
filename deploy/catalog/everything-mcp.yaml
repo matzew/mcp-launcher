@@ -17,5 +17,11 @@ data:
         "identifier": "quay.io/matzew/mcp-everything:latest",
         "transport": { "type": "streamable-http" }
       }],
-      "_meta": { "io.openshift/k8s": { "defaultPort": 3001 } }
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 3001,
+        "crTemplate": {
+          "image": "quay.io/matzew/mcp-everything:latest",
+          "port": 3001
+        }
+      } }
     }

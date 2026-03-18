@@ -16,21 +16,32 @@
     <h3>{{ .DisplayTitle }}</h3>
     <p>{{ .Description }}</p>
     <div>
-      {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}<span class="badge">ServiceAccount</span>{{ end }}{{ end }}
-      {{ if .K8s }}{{ if .K8s.ConfigMaps }}<span class="badge">ConfigMap</span>{{ end }}{{ end }}
-      {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}<span class="badge">Credentials</span>{{ end }}{{ end }}
-      {{ if .K8s }}{{ if .K8s.SecretMounts }}<span class="badge">File Mount</span>{{ end }}{{ end }}
-      {{ $hasEnv := false }}{{ $hasSA := false }}{{ $hasCM := false }}{{ $hasSM := false }}
-      {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}{{ $hasEnv = true }}{{ end }}{{ end }}
-      {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}{{ $hasSA = true }}{{ end }}{{ end }}
-      {{ if .K8s }}{{ if .K8s.ConfigMaps }}{{ $hasCM = true }}{{ end }}{{ end }}
-      {{ if .K8s }}{{ if .K8s.SecretMounts }}{{ $hasSM = true }}{{ end }}{{ end }}
-      {{ if not $hasEnv }}{{ if not $hasSA }}{{ if not $hasCM }}{{ if not $hasSM }}
-        <span class="badge badge-green">Ready to run</span>
-      {{ end }}{{ end }}{{ end }}{{ end }}
+      {{ if .IsOneClick }}
+        <span class="badge badge-green">One-click</span>
+      {{ else }}
+        {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}<span class="badge">ServiceAccount</span>{{ end }}{{ end }}
+        {{ if .K8s }}{{ if .K8s.ConfigMaps }}<span class="badge">ConfigMap</span>{{ end }}{{ end }}
+        {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}<span class="badge">Credentials</span>{{ end }}{{ end }}
+        {{ if .K8s }}{{ if .K8s.SecretMounts }}<span class="badge">File Mount</span>{{ end }}{{ end }}
+        {{ $hasEnv := false }}{{ $hasSA := false }}{{ $hasCM := false }}{{ $hasSM := false }}
+        {{ if .PrimaryPackage }}{{ if .PrimaryPackage.EnvironmentVariables }}{{ $hasEnv = true }}{{ end }}{{ end }}
+        {{ if .K8s }}{{ if .K8s.NeedsServiceAccount }}{{ $hasSA = true }}{{ end }}{{ end }}
+        {{ if .K8s }}{{ if .K8s.ConfigMaps }}{{ $hasCM = true }}{{ end }}{{ end }}
+        {{ if .K8s }}{{ if .K8s.SecretMounts }}{{ $hasSM = true }}{{ end }}{{ end }}
+        {{ if not $hasEnv }}{{ if not $hasSA }}{{ if not $hasCM }}{{ if not $hasSM }}
+          <span class="badge badge-green">Ready to run</span>
+        {{ end }}{{ end }}{{ end }}{{ end }}
+      {{ end }}
     </div>
     <div style="margin-top: 0.75rem;">
-      <a href="/configure/{{ .Name }}" class="btn btn-primary">Configure &amp; Run</a>
+      {{ if .IsOneClick }}
+        <form method="POST" action="/deploy/{{ .Name }}" style="display: inline;">
+          <button type="submit" class="btn btn-primary">Deploy</button>
+        </form>
+        <a href="/configure/{{ .Name }}" style="margin-left: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); text-decoration: underline;">Configure</a>
+      {{ else }}
+        <a href="/configure/{{ .Name }}" class="btn btn-primary">Configure &amp; Run</a>
+      {{ end }}
     </div>
   </div>
   {{ end }}

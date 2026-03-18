@@ -66,11 +66,12 @@ type PackageArgument struct {
 
 // KubernetesExtensions holds Kubernetes-specific configuration with no standard equivalent.
 type KubernetesExtensions struct {
-	DefaultPort         int32         `json:"defaultPort,omitempty"`
-	NeedsServiceAccount bool          `json:"needsServiceAccount,omitempty"`
-	ServiceAccountHint  string        `json:"serviceAccountHint,omitempty"`
-	ConfigMaps          []ConfigMap   `json:"configMaps,omitempty"`
-	SecretMounts        []SecretMount `json:"secretMounts,omitempty"`
+	DefaultPort         int32          `json:"defaultPort,omitempty"`
+	NeedsServiceAccount bool           `json:"needsServiceAccount,omitempty"`
+	ServiceAccountHint  string         `json:"serviceAccountHint,omitempty"`
+	ConfigMaps          []ConfigMap    `json:"configMaps,omitempty"`
+	SecretMounts        []SecretMount  `json:"secretMounts,omitempty"`
+	CRTemplate          map[string]any `json:"crTemplate,omitempty"`
 }
 
 // ConfigMap describes a ConfigMap the server needs.
@@ -88,6 +89,11 @@ type SecretMount struct {
 	MountPath   string `json:"mountPath"`
 	Description string `json:"description,omitempty"`
 	IsRequired  bool   `json:"isRequired,omitempty"`
+}
+
+// IsOneClick returns true if this entry has a crTemplate and can be deployed without configuration.
+func (e *ServerEntry) IsOneClick() bool {
+	return e.K8s() != nil && e.K8s().CRTemplate != nil
 }
 
 // PrimaryPackage returns the first package from the entry, or nil if none exist.

@@ -137,7 +137,7 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `<pre><code id="yaml-output">%s</code></pre>`, template.HTMLEscapeString(yaml))
 }
 
-// Run creates the Secret(s) and MCPServer CR.
+// Run creates the MCPServer CR, then the owned Secret(s) and ConfigMap(s).
 func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "invalid form data", http.StatusBadRequest)
@@ -187,8 +187,19 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Track resources to create after the MCPServer CR (so we can set ownerReferences)
+	type pendingSecret struct {
+		name string
+		data map[string]string
+	}
+	type pendingConfigMap struct {
+		name string
+		data map[string]string
+	}
+	var pendingSecrets []pendingSecret
+	var pendingConfigMaps []pendingConfigMap
+
 	var envVars []any
-	var secretCreated bool
 	secretName := instanceName + "-credentials"
 	secretData := map[string]string{}
 
@@ -209,8 +220,10 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 					},
 				},
 			})
-			secretCreated = true
 		}
+	}
+	if len(secretData) > 0 {
+		pendingSecrets = append(pendingSecrets, pendingSecret{name: secretName, data: secretData})
 	}
 
 	// Secret file mounts
@@ -221,12 +234,10 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			fileSecretName := instanceName + "-" + strings.TrimSuffix(sm.SecretKey, ".pem") + "-secret"
-			if err := h.createSecret(ctx, namespace, fileSecretName, map[string]string{
-				sm.SecretKey: fileContent,
-			}); err != nil {
-				http.Error(w, fmt.Sprintf("failed to create secret: %v", err), http.StatusInternalServerError)
-				return
-			}
+			pendingSecrets = append(pendingSecrets, pendingSecret{
+				name: fileSecretName,
+				data: map[string]string{sm.SecretKey: fileContent},
+			})
 			spec["secretRef"] = map[string]any{"name": fileSecretName}
 			spec["secretMountPath"] = sm.MountPath
 			spec["secretKey"] = sm.SecretKey
@@ -250,13 +261,6 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if secretCreated {
-		if err := h.createSecret(ctx, namespace, secretName, secretData); err != nil {
-			http.Error(w, fmt.Sprintf("failed to create secret: %v", err), http.StatusInternalServerError)
-			return
-		}
-	}
-
 	if len(args) > 0 {
 		spec["args"] = args
 	}
@@ -273,34 +277,21 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	configMapRef := r.FormValue("configmap-ref")
 	configMapContent := r.FormValue("configmap-content")
 	if configMapRef != "" {
-		// Use existing ConfigMap
 		spec["configMapRef"] = map[string]any{"name": configMapRef}
 	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
-		// Create a new ConfigMap from the provided content
 		cmName := instanceName + "-config"
 		fileName := entry.K8s().ConfigMaps[0].FileName
 		if fileName == "" {
 			fileName = "config"
 		}
-		cm := &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      cmName,
-				Namespace: namespace,
-				Labels: map[string]string{
-					"app.kubernetes.io/managed-by": "mcp-launcher",
-				},
-			},
-			Data: map[string]string{
-				fileName: configMapContent,
-			},
-		}
-		if _, err := h.clientset.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
-			http.Error(w, fmt.Sprintf("failed to create ConfigMap: %v", err), http.StatusInternalServerError)
-			return
-		}
+		pendingConfigMaps = append(pendingConfigMaps, pendingConfigMap{
+			name: cmName,
+			data: map[string]string{fileName: configMapContent},
+		})
 		spec["configMapRef"] = map[string]any{"name": cmName}
 	}
 
+	// Create the MCPServer CR first to get its UID for ownerReferences
 	mcpServer := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "mcp.x-k8s.io/v1alpha1",
@@ -313,7 +304,7 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
-	_, err = h.dynamicClient.Resource(mcpServerGVR).Namespace(namespace).Create(
+	created, err := h.dynamicClient.Resource(mcpServerGVR).Namespace(namespace).Create(
 		ctx, mcpServer, metav1.CreateOptions{},
 	)
 	if err != nil {
@@ -321,12 +312,114 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ownerRef := ownerRefFrom(created)
+
+	// Create owned Secrets
+	for _, ps := range pendingSecrets {
+		if err := h.createSecret(ctx, namespace, ps.name, ps.data, ownerRef); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create secret: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Create owned ConfigMaps
+	for _, pcm := range pendingConfigMaps {
+		if err := h.createConfigMap(ctx, namespace, pcm.name, pcm.data, ownerRef); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create ConfigMap: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
 	http.Redirect(w, r, "/running", http.StatusSeeOther)
 }
 
-// Running renders the list of running MCPServer instances.
+// QuickDeploy creates an MCPServer CR directly from a catalog entry's crTemplate.
+func (h *Handler) QuickDeploy(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	entry, err := h.catalog.Get(r.Context(), name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	if !entry.IsOneClick() {
+		http.Error(w, "this server requires configuration", http.StatusBadRequest)
+		return
+	}
+
+	spec := make(map[string]any)
+	for k, v := range entry.K8s().CRTemplate {
+		spec[k] = v
+	}
+
+	namespace := h.targetNamespace
+	if ns, ok := spec["namespace"].(string); ok && ns != "" {
+		namespace = ns
+		delete(spec, "namespace")
+	}
+
+	instanceName := entry.Name
+	ctx := r.Context()
+
+	// Pre-wire configMapRef names (resources created after the CR for ownerReferences)
+	type pendingConfigMap struct {
+		name     string
+		fileName string
+		content  string
+	}
+	var pendingCMs []pendingConfigMap
+	if k8s := entry.K8s(); k8s != nil {
+		for _, cm := range k8s.ConfigMaps {
+			if cm.DefaultContent == "" {
+				continue
+			}
+			cmName := instanceName + "-config"
+			fileName := cm.FileName
+			if fileName == "" {
+				fileName = "config"
+			}
+			pendingCMs = append(pendingCMs, pendingConfigMap{name: cmName, fileName: fileName, content: cm.DefaultContent})
+			spec["configMapRef"] = map[string]any{"name": cmName}
+		}
+	}
+
+	// Create MCPServer CR first to get its UID for ownerReferences
+	mcpServer := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "mcp.x-k8s.io/v1alpha1",
+			"kind":       "MCPServer",
+			"metadata": map[string]any{
+				"name":      instanceName,
+				"namespace": namespace,
+			},
+			"spec": spec,
+		},
+	}
+
+	created, err := h.dynamicClient.Resource(mcpServerGVR).Namespace(namespace).Create(
+		ctx, mcpServer, metav1.CreateOptions{},
+	)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to create MCPServer: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	ownerRef := ownerRefFrom(created)
+
+	// Create owned ConfigMaps
+	for _, pcm := range pendingCMs {
+		if err := h.createConfigMap(ctx, namespace, pcm.name, map[string]string{pcm.fileName: pcm.content}, ownerRef); err != nil {
+			http.Error(w, fmt.Sprintf("failed to create ConfigMap: %v", err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	http.Redirect(w, r, "/running", http.StatusSeeOther)
+}
+
+// Running renders the list of running MCPServer instances across all namespaces.
 func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
-	list, err := h.dynamicClient.Resource(mcpServerGVR).Namespace(h.targetNamespace).List(
+	list, err := h.dynamicClient.Resource(mcpServerGVR).Namespace("").List(
 		r.Context(), metav1.ListOptions{},
 	)
 	if err != nil {
@@ -335,16 +428,18 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type serverStatus struct {
-		Name     string
-		Image    string
-		Phase    string
-		Port     int64
-		Endpoint string
+		Name      string
+		Namespace string
+		Image     string
+		Phase     string
+		Port      int64
+		Endpoint  string
 	}
 
 	var servers []serverStatus
 	for _, item := range list.Items {
 		name := item.GetName()
+		ns := item.GetNamespace()
 		phase, _, _ := unstructured.NestedString(item.Object, "status", "phase")
 		if phase == "" {
 			phase = "Pending"
@@ -355,11 +450,12 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 		endpoint, _, _ := unstructured.NestedString(item.Object, "status", "address", "url")
 
 		servers = append(servers, serverStatus{
-			Name:     name,
-			Image:    image,
-			Phase:    phase,
-			Port:     port,
-			Endpoint: endpoint,
+			Name:      name,
+			Namespace: ns,
+			Image:     image,
+			Phase:     phase,
+			Port:      port,
+			Endpoint:  endpoint,
 		})
 	}
 
@@ -386,7 +482,6 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
 		"ActivePage": "running",
 		"Servers":    servers,
-		"Namespace":  h.targetNamespace,
 	}
 	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("template error: %v", err)
@@ -395,37 +490,38 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 
 // Delete removes an MCPServer CR and its managed artifacts (Secrets, ConfigMaps).
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	namespace := r.PathValue("namespace")
 	name := r.PathValue("name")
 	ctx := r.Context()
 
 	// Clean up managed Secrets and ConfigMaps created by the launcher for this instance.
-	// Convention: resources are named <instance>-credentials, <instance>-*-secret, <instance>-config
+	// With ownerReferences this is a safety net — GC handles the common case.
 	managedLabel := "app.kubernetes.io/managed-by=mcp-launcher"
 
-	secrets, err := h.clientset.CoreV1().Secrets(h.targetNamespace).List(ctx, metav1.ListOptions{
+	secrets, err := h.clientset.CoreV1().Secrets(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: managedLabel,
 	})
 	if err == nil {
 		for _, s := range secrets.Items {
 			if strings.HasPrefix(s.Name, name+"-") {
-				_ = h.clientset.CoreV1().Secrets(h.targetNamespace).Delete(ctx, s.Name, metav1.DeleteOptions{})
+				_ = h.clientset.CoreV1().Secrets(namespace).Delete(ctx, s.Name, metav1.DeleteOptions{})
 			}
 		}
 	}
 
-	configMaps, err := h.clientset.CoreV1().ConfigMaps(h.targetNamespace).List(ctx, metav1.ListOptions{
+	configMaps, err := h.clientset.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: managedLabel,
 	})
 	if err == nil {
 		for _, cm := range configMaps.Items {
 			if strings.HasPrefix(cm.Name, name+"-") {
-				_ = h.clientset.CoreV1().ConfigMaps(h.targetNamespace).Delete(ctx, cm.Name, metav1.DeleteOptions{})
+				_ = h.clientset.CoreV1().ConfigMaps(namespace).Delete(ctx, cm.Name, metav1.DeleteOptions{})
 			}
 		}
 	}
 
 	// Delete the MCPServer CR itself
-	err = h.dynamicClient.Resource(mcpServerGVR).Namespace(h.targetNamespace).Delete(
+	err = h.dynamicClient.Resource(mcpServerGVR).Namespace(namespace).Delete(
 		ctx, name, metav1.DeleteOptions{},
 	)
 	if err != nil {
@@ -435,7 +531,17 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h *Handler) createSecret(ctx context.Context, namespace, name string, data map[string]string) error {
+// ownerRefFrom builds an OwnerReference from a created MCPServer CR.
+func ownerRefFrom(obj *unstructured.Unstructured) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: obj.GetAPIVersion(),
+		Kind:       obj.GetKind(),
+		Name:       obj.GetName(),
+		UID:        obj.GetUID(),
+	}
+}
+
+func (h *Handler) createSecret(ctx context.Context, namespace, name string, data map[string]string, ownerRef metav1.OwnerReference) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -443,10 +549,27 @@ func (h *Handler) createSecret(ctx context.Context, namespace, name string, data
 			Labels: map[string]string{
 				"app.kubernetes.io/managed-by": "mcp-launcher",
 			},
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
 		},
 		StringData: data,
 	}
 	_, err := h.clientset.CoreV1().Secrets(namespace).Create(ctx, secret, metav1.CreateOptions{})
+	return err
+}
+
+func (h *Handler) createConfigMap(ctx context.Context, namespace, name string, data map[string]string, ownerRef metav1.OwnerReference) error {
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "mcp-launcher",
+			},
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
+		},
+		Data: data,
+	}
+	_, err := h.clientset.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
 	return err
 }
 

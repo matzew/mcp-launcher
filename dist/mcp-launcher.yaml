@@ -6,7 +6,7 @@
 #   - Namespace: mcp-catalog (catalog ConfigMaps)
 #   - ServiceAccount, ClusterRole, ClusterRoleBinding
 #   - Deployment + Service
-#   - 5 sample catalog entries
+#   - Sample catalog entries with prerequisites
 ---
 apiVersion: v1
 kind: Namespace
@@ -18,11 +18,18 @@ kind: Namespace
 metadata:
   name: mcp-catalog
 ---
-apiVersion: v1
-kind: ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
 metadata:
   name: mcp-launcher
-  namespace: mcp-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-launcher
+subjects:
+  - kind: ServiceAccount
+    name: mcp-launcher
+    namespace: mcp-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -49,18 +56,11 @@ rules:
     resources: ["namespaces"]
     verbs: ["list"]
 ---
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+apiVersion: v1
+kind: ServiceAccount
 metadata:
   name: mcp-launcher
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: mcp-launcher
-subjects:
-  - kind: ServiceAccount
-    name: mcp-launcher
-    namespace: mcp-system
+  namespace: mcp-system
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -134,6 +134,7 @@ spec:
       protocol: TCP
 ---
 # ── Sample Catalog Entries ──
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -190,7 +191,13 @@ data:
         "identifier": "quay.io/matzew/mcp-everything:latest",
         "transport": { "type": "streamable-http" }
       }],
-      "_meta": { "io.openshift/k8s": { "defaultPort": 3001 } }
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 3001,
+        "crTemplate": {
+          "image": "quay.io/matzew/mcp-everything:latest",
+          "port": 3001
+        }
+      } }
     }
 ---
 apiVersion: v1
@@ -235,6 +242,31 @@ data:
       "_meta": { "io.openshift/k8s": { "defaultPort": 8000 } }
     }
 ---
+# ServiceAccount for read-only Kubernetes access (used by the MCP server pod)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-viewer
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: mcp-launcher
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-viewer
+  labels:
+    app.kubernetes.io/managed-by: mcp-launcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: mcp-viewer
+    namespace: default
+---
+# Catalog entry
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -272,7 +304,13 @@ data:
             "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
             "fileName": "config.toml"
           }
-        ]
+        ],
+        "crTemplate": {
+          "image": "quay.io/containers/kubernetes_mcp_server:latest",
+          "port": 8080,
+          "args": ["--config", "/etc/mcp-config/config.toml"],
+          "serviceAccountName": "mcp-viewer"
+        }
       } }
     }
 ---

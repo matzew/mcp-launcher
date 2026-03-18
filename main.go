@@ -42,8 +42,9 @@ func main() {
 	mux.HandleFunc("GET /configure/{name}", h.Configure)
 	mux.HandleFunc("GET /preview/{name}", h.Preview)
 	mux.HandleFunc("POST /run", h.Run)
+	mux.HandleFunc("POST /deploy/{name}", h.QuickDeploy)
 	mux.HandleFunc("GET /running", h.Running)
-	mux.HandleFunc("DELETE /server/{name}", h.Delete)
+	mux.HandleFunc("DELETE /server/{namespace}/{name}", h.Delete)
 
 	log.Printf("MCP Launcher listening on %s", listenAddr)
 	log.Printf("Catalog namespace: %s, Target namespace: %s", catalogNamespace, targetNamespace)
