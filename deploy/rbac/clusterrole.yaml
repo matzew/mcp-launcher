@@ -3,10 +3,10 @@ kind: ClusterRole
 metadata:
   name: mcp-launcher
 rules:
-  # Read catalog ConfigMaps
+  # Read catalog ConfigMaps + create/delete managed ConfigMaps for server config
   - apiGroups: [""]
     resources: ["configmaps"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "create", "delete"]
   # Create/manage secrets for server credentials
   - apiGroups: [""]
     resources: ["secrets"]
