@@ -1,3 +1,28 @@
+# ServiceAccount for read-only Kubernetes access (used by the MCP server pod)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-viewer
+  namespace: default
+  labels:
+    app.kubernetes.io/managed-by: mcp-launcher
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-viewer
+  labels:
+    app.kubernetes.io/managed-by: mcp-launcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: view
+subjects:
+  - kind: ServiceAccount
+    name: mcp-viewer
+    namespace: default
+---
+# Catalog entry
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -35,6 +60,12 @@ data:
             "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
             "fileName": "config.toml"
           }
-        ]
+        ],
+        "crTemplate": {
+          "image": "quay.io/containers/kubernetes_mcp_server:latest",
+          "port": 8080,
+          "args": ["--config", "/etc/mcp-config/config.toml"],
+          "serviceAccountName": "mcp-viewer"
+        }
       } }
     }
