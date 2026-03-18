@@ -352,10 +352,7 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 		image, _, _ := unstructured.NestedString(item.Object, "spec", "image")
 		port, _, _ := unstructured.NestedInt64(item.Object, "spec", "port")
 
-		endpoint := ""
-		if phase == "Running" {
-			endpoint = fmt.Sprintf("http://%s.%s.svc:%d", name, h.targetNamespace, port)
-		}
+		endpoint, _, _ := unstructured.NestedString(item.Object, "status", "address", "url")
 
 		servers = append(servers, serverStatus{
 			Name:     name,
