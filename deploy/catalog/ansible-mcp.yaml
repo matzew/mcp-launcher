@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-ansible-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "ansible-mcp-server",
+      "title": "Ansible Automation Platform",
+      "description": "Interact with Ansible Automation Platform (AAP) via MCP",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "registry.redhat.io/ansible-automation-platform-25/aap-mcp-server-rhel9:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "AAP_URL",
+            "description": "AAP Base URL",
+            "placeholder": "https://aap.example.com",
+            "isRequired": true,
+            "isSecret": false
+          },
+          {
+            "name": "AAP_OAUTH_TOKEN",
+            "description": "OAuth2 Bearer Token (validated against {base-url}/api/gateway/v1/me/)",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3000 } }
+    }

@@ -1,0 +1,30 @@
+{{ define "running-list" }}
+{{ if not .Servers }}
+<div class="card empty-state">
+  <p>No MCP servers running.</p>
+  <p><a href="/">Launch one from the catalog</a></p>
+</div>
+{{ else }}
+{{ range .Servers }}
+<div class="server-row">
+  <span class="name">{{ .Name }}</span>
+  <span class="status status-{{ .Phase }}">{{ .Phase }}</span>
+  <span class="image" title="{{ .Image }}">{{ .Image }}</span>
+  {{ if .Endpoint }}
+  <span class="endpoint">{{ .Endpoint }}</span>
+  <button class="btn btn-outline btn-sm"
+          onclick="navigator.clipboard.writeText('{{ .Endpoint }}'); this.textContent='Copied!'; setTimeout(()=>this.textContent='Copy URL',1500)">
+    Copy URL
+  </button>
+  {{ end }}
+  <button class="btn btn-danger btn-sm"
+          hx-delete="/server/{{ .Name }}"
+          hx-confirm="Delete {{ .Name }}?"
+          hx-target="closest .server-row"
+          hx-swap="outerHTML">
+    Delete
+  </button>
+</div>
+{{ end }}
+{{ end }}
+{{ end }}

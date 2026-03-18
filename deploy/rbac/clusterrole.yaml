@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-launcher
+rules:
+  # Read catalog ConfigMaps + create/delete managed ConfigMaps for server config
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "delete"]
+  # Create/manage secrets for server credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "delete"]
+  # Create/manage MCPServer resources
+  - apiGroups: ["mcp.x-k8s.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # List service accounts and namespaces for dropdowns
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]

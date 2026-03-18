@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-everything-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "everything-mcp-server",
+      "title": "Everything MCP (Test)",
+      "description": "Reference MCP server for testing (echoes tools, resources, prompts)",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "quay.io/matzew/mcp-everything:latest",
+        "transport": { "type": "streamable-http" }
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3001 } }
+    }

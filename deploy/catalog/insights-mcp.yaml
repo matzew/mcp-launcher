@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-insights-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "insights-mcp-server",
+      "title": "Red Hat Insights & Lightspeed",
+      "description": "Red Hat Insights and Lightspeed integration via MCP",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "ghcr.io/redhatinsights/red-hat-lightspeed-mcp:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "LIGHTSPEED_CLIENT_ID",
+            "description": "Service Account Client ID (create at console.redhat.com)",
+            "isRequired": true,
+            "isSecret": true
+          },
+          {
+            "name": "LIGHTSPEED_CLIENT_SECRET",
+            "description": "Service Account Client Secret",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ],
+        "packageArguments": [
+          {
+            "type": "positional",
+            "value": "http"
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 8000 } }
+    }
