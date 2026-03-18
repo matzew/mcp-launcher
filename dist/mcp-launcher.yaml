@@ -1,0 +1,318 @@
+# MCP Launcher - Single-file install
+# kubectl apply -f dist/mcp-launcher.yaml
+#
+# Creates:
+#   - Namespace: mcp-system (launcher deployment)
+#   - Namespace: mcp-catalog (catalog ConfigMaps)
+#   - ServiceAccount, ClusterRole, ClusterRoleBinding
+#   - Deployment + Service
+#   - 5 sample catalog entries
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-system
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-catalog
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-launcher
+  namespace: mcp-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-launcher
+rules:
+  # Read catalog ConfigMaps + create/delete managed ConfigMaps for server config
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "create", "delete"]
+  # Create/manage secrets for server credentials
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "create", "delete"]
+  # Create/manage MCPServer resources
+  - apiGroups: ["mcp.x-k8s.io"]
+    resources: ["mcpservers"]
+    verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # List service accounts and namespaces for dropdowns
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-launcher
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: mcp-launcher
+subjects:
+  - kind: ServiceAccount
+    name: mcp-launcher
+    namespace: mcp-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mcp-launcher
+  namespace: mcp-system
+  labels:
+    app: mcp-launcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mcp-launcher
+  template:
+    metadata:
+      labels:
+        app: mcp-launcher
+    spec:
+      serviceAccountName: mcp-launcher
+      containers:
+        - name: mcp-launcher
+          image: quay.io/matzew/mcp-launcher:latest
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: CATALOG_NAMESPACE
+              value: mcp-catalog
+            - name: TARGET_NAMESPACE
+              value: default
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mcp-launcher
+  namespace: mcp-system
+  labels:
+    app: mcp-launcher
+spec:
+  type: ClusterIP
+  selector:
+    app: mcp-launcher
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+---
+# ── Sample Catalog Entries ──
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-ansible-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "ansible-mcp-server",
+      "title": "Ansible Automation Platform",
+      "description": "Interact with Ansible Automation Platform (AAP) via MCP",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "registry.redhat.io/ansible-automation-platform-25/aap-mcp-server-rhel9:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "AAP_URL",
+            "description": "AAP Base URL",
+            "placeholder": "https://aap.example.com",
+            "isRequired": true,
+            "isSecret": false
+          },
+          {
+            "name": "AAP_OAUTH_TOKEN",
+            "description": "OAuth2 Bearer Token (validated against {base-url}/api/gateway/v1/me/)",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3000 } }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-everything-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "everything-mcp-server",
+      "title": "Everything MCP (Test)",
+      "description": "Reference MCP server for testing (echoes tools, resources, prompts)",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "quay.io/matzew/mcp-everything:latest",
+        "transport": { "type": "streamable-http" }
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3001 } }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-insights-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "insights-mcp-server",
+      "title": "Red Hat Insights & Lightspeed",
+      "description": "Red Hat Insights and Lightspeed integration via MCP",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "ghcr.io/redhatinsights/red-hat-lightspeed-mcp:latest",
+        "transport": { "type": "streamable-http" },
+        "environmentVariables": [
+          {
+            "name": "LIGHTSPEED_CLIENT_ID",
+            "description": "Service Account Client ID (create at console.redhat.com)",
+            "isRequired": true,
+            "isSecret": true
+          },
+          {
+            "name": "LIGHTSPEED_CLIENT_SECRET",
+            "description": "Service Account Client Secret",
+            "isRequired": true,
+            "isSecret": true
+          }
+        ],
+        "packageArguments": [
+          {
+            "type": "positional",
+            "value": "http"
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": { "defaultPort": 8000 } }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-kubernetes-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "kubernetes-mcp-server",
+      "title": "Kubernetes",
+      "description": "Query and manage Kubernetes resources via MCP",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "quay.io/containers/kubernetes_mcp_server:latest",
+        "transport": { "type": "streamable-http" },
+        "packageArguments": [
+          {
+            "type": "named",
+            "name": "--config",
+            "value": "/etc/mcp-config/config.toml"
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 8080,
+        "needsServiceAccount": true,
+        "serviceAccountHint": "Needs a ServiceAccount bound to the 'view' ClusterRole for read-only access",
+        "configMaps": [
+          {
+            "label": "Server Configuration (config.toml)",
+            "description": "TOML config file mounted at /etc/mcp-config/config.toml",
+            "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
+            "fileName": "config.toml"
+          }
+        ]
+      } }
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-satellite-mcp
+  namespace: mcp-catalog
+  labels:
+    mcp.x-k8s.io/catalog-entry: "true"
+data:
+  server.json: |
+    {
+      "name": "satellite-mcp-server",
+      "title": "Red Hat Satellite",
+      "description": "Interact with Red Hat Satellite for host and content management",
+      "version": "1.0.0",
+      "packages": [{
+        "registryType": "oci",
+        "identifier": "registry.redhat.io/satellite/foreman-mcp-server-rhel9:6.18",
+        "transport": { "type": "streamable-http" },
+        "packageArguments": [
+          {
+            "type": "named",
+            "name": "--foreman-url",
+            "description": "Satellite URL",
+            "placeholder": "https://satellite.example.com",
+            "isRequired": true
+          }
+        ]
+      }],
+      "_meta": { "io.openshift/k8s": {
+        "defaultPort": 8080,
+        "secretMounts": [
+          {
+            "secretKey": "ca.pem",
+            "mountPath": "/app/ca.pem",
+            "description": "Satellite CA Bundle (download from https://satellite.example.com/unattended/public/foreman_raw_ca)",
+            "isRequired": true
+          }
+        ]
+      } }
+    }

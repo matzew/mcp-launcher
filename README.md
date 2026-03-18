@@ -47,14 +47,17 @@ Kubernetes-specific extensions live under `_meta` → `io.openshift/k8s` per the
 
 ### Deploy
 
-```bash
-# Create namespaces
-kubectl create namespace mcp-catalog
-kubectl create namespace mcp-system
+Single-file install (namespaces, RBAC, deployment, service, and sample catalog):
 
-# Apply catalog entries, RBAC, and deployment
-make catalog
-make deploy
+```bash
+kubectl apply -f dist/mcp-launcher.yaml
+```
+
+Or step-by-step:
+
+```bash
+make catalog    # Create mcp-catalog namespace + sample ConfigMaps
+make deploy     # Create mcp-system namespace + RBAC + Deployment + Service
 ```
 
 ### Access the UI
@@ -96,6 +99,8 @@ make docker-push    # Push to quay.io/matzew/mcp-launcher:latest
 │   ├── catalog/               # Sample catalog ConfigMaps (5 servers)
 │   ├── deployment.yaml        # Deployment + Service
 │   └── rbac/                  # ServiceAccount, ClusterRole, ClusterRoleBinding
+├── dist/
+│   └── mcp-launcher.yaml      # Single-file install (all resources)
 ├── Dockerfile                 # Multi-stage: ubi9/go-toolset → ubi9-micro
 └── Makefile
 ```
