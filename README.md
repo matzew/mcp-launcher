@@ -42,7 +42,7 @@ Kubernetes-specific extensions live under `_meta` → `io.openshift/k8s` per the
 
 ### Prerequisites
 
-- Kubernetes / OpenShift cluster with the [MCP Lifecycle Operator](https://github.com/opendatahub-io/mcp-lifecycle-operator) installed
+- Kubernetes / OpenShift cluster with the [MCP Lifecycle Operator](https://github.com/kubernetes-sigs/mcp-lifecycle-operator) installed
 - `kubectl` / `oc` configured
 
 ### Deploy
