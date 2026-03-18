@@ -33,8 +33,16 @@ docker-push: ## Push container image.
 ko-build: ## Build and push with ko.
 	KO_DOCKER_REPO=quay.io/matzew ko build -B --tags latest .
 
+.PHONY: install
+install: ## Install everything from single-file distribution.
+	kubectl apply -f dist/mcp-launcher.yaml
+
+.PHONY: uninstall
+uninstall: ## Remove everything installed by dist/mcp-launcher.yaml.
+	kubectl delete -f dist/mcp-launcher.yaml || true
+
 .PHONY: deploy
-deploy: ## Deploy to cluster.
+deploy: ## Deploy to cluster (individual manifests).
 	kubectl apply -f deploy/rbac/
 	kubectl apply -f deploy/deployment.yaml
 
