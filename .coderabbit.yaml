@@ -1,0 +1,27 @@
+language: en
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - main
+  request_changes_workflow: false
+  path_instructions:
+    - path: "**/*.go"
+      instructions: |
+        Follow Kubernetes client-go patterns. Use interfaces for testability
+        (kubernetes.Interface, dynamic.Interface). Wrap errors with context.
+        Constructor injection for dependencies — no global state.
+    - path: "handlers/**"
+      instructions: |
+        Verify ownerReferences are set on all created Secrets and ConfigMaps.
+        Template rendering must use pageTemplate() — never inline ParseFiles.
+        Check that form field names match the env-/arg-/file-/configmap- conventions.
+    - path: "catalog/**"
+      instructions: |
+        Types should stay aligned with the MCP Registry standard. Verify JSON
+        tags match the expected wire format. K8s extensions live under _meta.
+    - path: "templates/**"
+      instructions: |
+        Each page template must define a content block. Verify htmx attributes
+        use correct endpoints and swap strategies. Check that the running-list
+        partial works both standalone and embedded.
