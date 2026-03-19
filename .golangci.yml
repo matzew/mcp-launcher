@@ -1,0 +1,40 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - misspell
+    - gocritic
+    - bodyclose
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Sscanf
+    gocritic:
+      enabled-tags:
+        - diagnostic
+      disabled-checks:
+        - appendAssign
+        - commentFormatting
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gocritic
+  exclude-dirs:
+    - vendor
