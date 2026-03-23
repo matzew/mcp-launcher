@@ -58,14 +58,27 @@ data:
             "label": "Server Configuration (config.toml)",
             "description": "TOML config file mounted at /etc/mcp-config/config.toml",
             "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
-            "fileName": "config.toml"
+            "fileName": "config.toml",
+            "mountPath": "/etc/mcp-config"
           }
         ],
         "crTemplate": {
-          "image": "quay.io/containers/kubernetes_mcp_server:latest",
-          "port": 8080,
-          "args": ["--config", "/etc/mcp-config/config.toml"],
-          "serviceAccountName": "mcp-viewer"
+          "source": {
+            "type": "ContainerImage",
+            "containerImage": {
+              "ref": "quay.io/containers/kubernetes_mcp_server:latest"
+            }
+          },
+          "config": {
+            "port": 8080,
+            "path": "/mcp",
+            "arguments": ["--config", "/etc/mcp-config/config.toml"]
+          },
+          "runtime": {
+            "security": {
+              "serviceAccountName": "mcp-viewer"
+            }
+          }
         }
       } }
     }

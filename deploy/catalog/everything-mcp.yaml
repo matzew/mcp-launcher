@@ -20,8 +20,16 @@ data:
       "_meta": { "io.openshift/k8s": {
         "defaultPort": 3001,
         "crTemplate": {
-          "image": "quay.io/matzew/mcp-everything:latest",
-          "port": 3001
+          "source": {
+            "type": "ContainerImage",
+            "containerImage": {
+              "ref": "quay.io/matzew/mcp-everything:latest"
+            }
+          },
+          "config": {
+            "port": 3001,
+            "path": "/mcp"
+          }
         }
       } }
     }
