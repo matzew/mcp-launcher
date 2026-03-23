@@ -76,13 +76,13 @@ func TestIsOneClick(t *testing.T) {
 				Meta: &Meta{
 					K8s: &KubernetesExtensions{
 						CRTemplate: map[string]any{
-						"source": map[string]any{
-							"type": "ContainerImage",
-							"containerImage": map[string]any{
-								"ref": "test:latest",
+							"source": map[string]any{
+								"type": "ContainerImage",
+								"containerImage": map[string]any{
+									"ref": "test:latest",
+								},
 							},
 						},
-					},
 					},
 				},
 			},
