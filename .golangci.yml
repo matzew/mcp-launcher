@@ -26,15 +26,15 @@ linters:
         - appendAssign
         - commentFormatting
 
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocritic
+    paths:
+      - vendor
+
 formatters:
   enable:
     - gofmt
-
-issues:
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gocritic
-  exclude-dirs:
-    - vendor
