@@ -97,8 +97,16 @@ func simpleEntry(name string) *catalog.ServerEntry {
 func oneClickEntry(name string) *catalog.ServerEntry {
 	e := simpleEntry(name)
 	e.Meta.K8s.CRTemplate = map[string]any{
-		"image": "quay.io/test/" + name + ":latest",
-		"port":  float64(3001),
+		"source": map[string]any{
+			"type": "ContainerImage",
+			"containerImage": map[string]any{
+				"ref": "quay.io/test/" + name + ":latest",
+			},
+		},
+		"config": map[string]any{
+			"port": float64(3001),
+			"path": "/mcp",
+		},
 	}
 	return e
 }
@@ -188,10 +196,49 @@ func TestBuildYAMLPreview(t *testing.T) {
 		"kind: MCPServer",
 		"name: my-instance",
 		"namespace: test-ns",
-		"image: quay.io/custom:v1",
+		"type: ContainerImage",
+		"ref: quay.io/custom:v1",
 		"port: 9090",
+		"path: /mcp",
 		"name: API_KEY",
 		"key: api-key",
+	}
+	for _, check := range checks {
+		if !strings.Contains(yaml, check) {
+			t.Errorf("YAML preview missing %q\nGot:\n%s", check, yaml)
+		}
+	}
+}
+
+func TestBuildYAMLPreviewRunAsRoot(t *testing.T) {
+	entry := &catalog.ServerEntry{
+		Name: "root-server",
+		Packages: []catalog.Package{
+			{Identifier: "quay.io/test/root:latest"},
+		},
+		Meta: &catalog.Meta{
+			K8s: &catalog.KubernetesExtensions{
+				DefaultPort: 8080,
+			},
+		},
+	}
+
+	form := url.Values{}
+	form.Set("instance-name", "root-instance")
+	form.Set("namespace", "test-ns")
+	form.Set("image", "quay.io/test/root:latest")
+	form.Set("port", "8080")
+	form.Set("run-as-root", "on")
+
+	r := httptest.NewRequest("GET", "/preview/root-server?"+form.Encode(), nil)
+
+	yaml := buildYAMLPreview(r, entry, "default")
+
+	checks := []string{
+		"runtime:",
+		"security:",
+		"securityContext:",
+		"runAsNonRoot: false",
 	}
 	for _, check := range checks {
 		if !strings.Contains(yaml, check) {
@@ -220,7 +267,7 @@ func TestBuildYAMLPreviewDefaults(t *testing.T) {
 	if !strings.Contains(yaml, "namespace: default") {
 		t.Errorf("expected default namespace, got:\n%s", yaml)
 	}
-	if !strings.Contains(yaml, "image: quay.io/test/server:latest") {
+	if !strings.Contains(yaml, "ref: quay.io/test/server:latest") {
 		t.Errorf("expected default image from package, got:\n%s", yaml)
 	}
 }
@@ -337,7 +384,7 @@ func TestQuickDeploy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MCPServer not created: %v", err)
 		}
-		image, _, _ := unstructured.NestedString(created.Object, "spec", "image")
+		image, _, _ := unstructured.NestedString(created.Object, "spec", "source", "containerImage", "ref")
 		if image != "quay.io/test/quick-server:latest" {
 			t.Errorf("MCPServer image = %q, want %q", image, "quay.io/test/quick-server:latest")
 		}
@@ -383,8 +430,15 @@ func TestRunning(t *testing.T) {
 					"namespace": "default",
 				},
 				"spec": map[string]any{
-					"image": "quay.io/test/server:latest",
-					"port":  int64(3001),
+					"source": map[string]any{
+						"type": "ContainerImage",
+						"containerImage": map[string]any{
+							"ref": "quay.io/test/server:latest",
+						},
+					},
+					"config": map[string]any{
+						"port": int64(3001),
+					},
 				},
 				"status": map[string]any{
 					"phase": "Running",
@@ -416,7 +470,12 @@ func TestRunning(t *testing.T) {
 					"namespace": "default",
 				},
 				"spec": map[string]any{
-					"image": "quay.io/test/server:latest",
+					"source": map[string]any{
+						"type": "ContainerImage",
+						"containerImage": map[string]any{
+							"ref": "quay.io/test/server:latest",
+						},
+					},
 				},
 			},
 		}
@@ -447,7 +506,12 @@ func TestDelete(t *testing.T) {
 				"namespace": "default",
 			},
 			"spec": map[string]any{
-				"image": "quay.io/test/server:latest",
+				"source": map[string]any{
+					"type": "ContainerImage",
+					"containerImage": map[string]any{
+						"ref": "quay.io/test/server:latest",
+					},
+				},
 			},
 		},
 	}
@@ -474,67 +538,127 @@ func TestDelete(t *testing.T) {
 }
 
 func TestRun(t *testing.T) {
-	entry := &catalog.ServerEntry{
-		Name:        "full-server",
-		Description: "Full test server",
-		Packages: []catalog.Package{
-			{
-				Identifier:   "quay.io/test/full:latest",
-				RegistryType: "oci",
-				Transport:    catalog.Transport{Type: "sse"},
-				EnvironmentVariables: []catalog.EnvironmentVariable{
-					{Name: "API_KEY", IsSecret: true, IsRequired: true},
+	t.Run("creates resource with env vars", func(t *testing.T) {
+		entry := &catalog.ServerEntry{
+			Name:        "full-server",
+			Description: "Full test server",
+			Packages: []catalog.Package{
+				{
+					Identifier:   "quay.io/test/full:latest",
+					RegistryType: "oci",
+					Transport:    catalog.Transport{Type: "sse"},
+					EnvironmentVariables: []catalog.EnvironmentVariable{
+						{Name: "API_KEY", IsSecret: true, IsRequired: true},
+					},
 				},
 			},
-		},
-		Meta: &catalog.Meta{
-			K8s: &catalog.KubernetesExtensions{
-				DefaultPort: 8080,
+			Meta: &catalog.Meta{
+				K8s: &catalog.KubernetesExtensions{
+					DefaultPort: 8080,
+				},
 			},
-		},
-	}
+		}
 
-	h := setupHandler(t, []*corev1.ConfigMap{
-		makeConfigMap("full-server", "catalog-ns", entryJSON(entry), true),
+		h := setupHandler(t, []*corev1.ConfigMap{
+			makeConfigMap("full-server", "catalog-ns", entryJSON(entry), true),
+		})
+
+		form := url.Values{}
+		form.Set("catalog-name", "full-server")
+		form.Set("instance-name", "my-instance")
+		form.Set("namespace", "default")
+		form.Set("image", "quay.io/test/full:latest")
+		form.Set("port", "8080")
+		form.Set("env-API_KEY", "my-secret-key")
+
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/run", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Run(w, r)
+
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("Run() status = %d, want %d\nbody: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+
+		// Verify the MCPServer CR was created
+		created, err := h.dynamicClient.Resource(mcpServerGVR).Namespace("default").Get(
+			context.Background(), "my-instance", metav1.GetOptions{},
+		)
+		if err != nil {
+			t.Fatalf("MCPServer not created: %v", err)
+		}
+		image, _, _ := unstructured.NestedString(created.Object, "spec", "source", "containerImage", "ref")
+		if image != "quay.io/test/full:latest" {
+			t.Errorf("MCPServer image = %q, want %q", image, "quay.io/test/full:latest")
+		}
+
+		// Verify the Secret was created with env var
+		secret, err := h.clientset.CoreV1().Secrets("default").Get(
+			context.Background(), "my-instance-credentials", metav1.GetOptions{},
+		)
+		if err != nil {
+			t.Fatalf("Secret not created: %v", err)
+		}
+		if secret.StringData["api-key"] != "my-secret-key" {
+			t.Errorf("Secret key api-key = %q, want %q", secret.StringData["api-key"], "my-secret-key")
+		}
 	})
 
-	form := url.Values{}
-	form.Set("catalog-name", "full-server")
-	form.Set("instance-name", "my-instance")
-	form.Set("namespace", "default")
-	form.Set("image", "quay.io/test/full:latest")
-	form.Set("port", "8080")
-	form.Set("env-API_KEY", "my-secret-key")
+	t.Run("run-as-root sets securityContext", func(t *testing.T) {
+		entry := &catalog.ServerEntry{
+			Name:        "root-server",
+			Description: "Root test server",
+			Packages: []catalog.Package{
+				{
+					Identifier:   "quay.io/test/root:latest",
+					RegistryType: "oci",
+					Transport:    catalog.Transport{Type: "sse"},
+				},
+			},
+			Meta: &catalog.Meta{
+				K8s: &catalog.KubernetesExtensions{
+					DefaultPort: 8080,
+				},
+			},
+		}
 
-	w := httptest.NewRecorder()
-	r := httptest.NewRequest("POST", "/run", strings.NewReader(form.Encode()))
-	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	h.Run(w, r)
+		h := setupHandler(t, []*corev1.ConfigMap{
+			makeConfigMap("root-server", "catalog-ns", entryJSON(entry), true),
+		})
 
-	if w.Code != http.StatusSeeOther {
-		t.Fatalf("Run() status = %d, want %d\nbody: %s", w.Code, http.StatusSeeOther, w.Body.String())
-	}
+		form := url.Values{}
+		form.Set("catalog-name", "root-server")
+		form.Set("instance-name", "root-instance")
+		form.Set("namespace", "default")
+		form.Set("image", "quay.io/test/root:latest")
+		form.Set("port", "8080")
+		form.Set("run-as-root", "on")
 
-	// Verify the MCPServer CR was created
-	created, err := h.dynamicClient.Resource(mcpServerGVR).Namespace("default").Get(
-		context.Background(), "my-instance", metav1.GetOptions{},
-	)
-	if err != nil {
-		t.Fatalf("MCPServer not created: %v", err)
-	}
-	image, _, _ := unstructured.NestedString(created.Object, "spec", "image")
-	if image != "quay.io/test/full:latest" {
-		t.Errorf("MCPServer image = %q, want %q", image, "quay.io/test/full:latest")
-	}
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/run", strings.NewReader(form.Encode()))
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		h.Run(w, r)
 
-	// Verify the Secret was created with env var
-	secret, err := h.clientset.CoreV1().Secrets("default").Get(
-		context.Background(), "my-instance-credentials", metav1.GetOptions{},
-	)
-	if err != nil {
-		t.Fatalf("Secret not created: %v", err)
-	}
-	if secret.StringData["api-key"] != "my-secret-key" {
-		t.Errorf("Secret key api-key = %q, want %q", secret.StringData["api-key"], "my-secret-key")
-	}
+		if w.Code != http.StatusSeeOther {
+			t.Fatalf("Run() status = %d, want %d\nbody: %s", w.Code, http.StatusSeeOther, w.Body.String())
+		}
+
+		created, err := h.dynamicClient.Resource(mcpServerGVR).Namespace("default").Get(
+			context.Background(), "root-instance", metav1.GetOptions{},
+		)
+		if err != nil {
+			t.Fatalf("MCPServer not created: %v", err)
+		}
+
+		runAsNonRoot, found, err := unstructured.NestedBool(created.Object, "spec", "runtime", "security", "securityContext", "runAsNonRoot")
+		if err != nil {
+			t.Fatalf("failed to read runAsNonRoot: %v", err)
+		}
+		if !found {
+			t.Fatal("spec.runtime.security.securityContext.runAsNonRoot not found")
+		}
+		if runAsNonRoot != false {
+			t.Errorf("runAsNonRoot = %v, want false", runAsNonRoot)
+		}
+	})
 }

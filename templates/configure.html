@@ -54,6 +54,15 @@
       </div>
       {{ end }}{{ end }}
 
+      <div class="section-header">Security</div>
+      <div class="form-group">
+        <label>
+          <input type="checkbox" name="run-as-root" {{ if .Server.K8s }}{{ if .Server.K8s.RunAsRoot }}checked{{ end }}{{ end }}>
+          Allow running as root
+        </label>
+        <p class="hint">The operator defaults to runAsNonRoot. Check this if the image requires root.</p>
+      </div>
+
       {{ if .Server.K8s }}{{ if .Server.K8s.ConfigMaps }}
       <div class="section-header">Configuration</div>
       {{ range .Server.K8s.ConfigMaps }}
@@ -149,8 +158,13 @@ metadata:
   name: {{ .Server.Name }}
   namespace: {{ .Namespace }}
 spec:
-  image: {{ if .Package }}{{ .Package.Identifier }}{{ end }}
-  port: {{ if .Server.K8s }}{{ .Server.K8s.DefaultPort }}{{ end }}</code></pre>
+  source:
+    type: ContainerImage
+    containerImage:
+      ref: {{ if .Package }}{{ .Package.Identifier }}{{ end }}
+  config:
+    port: {{ if .Server.K8s }}{{ .Server.K8s.DefaultPort }}{{ end }}
+    path: /mcp</code></pre>
     </div>
   </div>
 

@@ -69,6 +69,7 @@ type KubernetesExtensions struct {
 	DefaultPort         int32          `json:"defaultPort,omitempty"`
 	NeedsServiceAccount bool           `json:"needsServiceAccount,omitempty"`
 	ServiceAccountHint  string         `json:"serviceAccountHint,omitempty"`
+	RunAsRoot           bool           `json:"runAsRoot,omitempty"`
 	ConfigMaps          []ConfigMap    `json:"configMaps,omitempty"`
 	SecretMounts        []SecretMount  `json:"secretMounts,omitempty"`
 	CRTemplate          map[string]any `json:"crTemplate,omitempty"`
@@ -80,6 +81,7 @@ type ConfigMap struct {
 	Description    string `json:"description,omitempty"`
 	DefaultContent string `json:"defaultContent,omitempty"`
 	FileName       string `json:"fileName,omitempty"`
+	MountPath      string `json:"mountPath,omitempty"`
 	IsRequired     bool   `json:"isRequired,omitempty"`
 }
 

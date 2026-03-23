@@ -168,10 +168,20 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	spec := map[string]any{
-		"image": image,
-		"port":  parsePort(port, defaultPort),
+	configSection := map[string]any{
+		"port": parsePort(port, defaultPort),
+		"path": "/mcp",
 	}
+	spec := map[string]any{
+		"source": map[string]any{
+			"type": "ContainerImage",
+			"containerImage": map[string]any{
+				"ref": image,
+			},
+		},
+		"config": configSection,
+	}
+	var storageEntries []any
 
 	// Collect fixed args from packageArguments with a preset value
 	var args []string
@@ -238,9 +248,18 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 				name: fileSecretName,
 				data: map[string]string{sm.SecretKey: fileContent},
 			})
-			spec["secretRef"] = map[string]any{"name": fileSecretName}
-			spec["secretMountPath"] = sm.MountPath
-			spec["secretKey"] = sm.SecretKey
+			storageEntries = append(storageEntries, map[string]any{
+				"path": sm.MountPath,
+				"source": map[string]any{
+					"type": "Secret",
+					"secret": map[string]any{
+						"secretName": fileSecretName,
+						"items": []any{
+							map[string]any{"key": sm.SecretKey, "path": sm.SecretKey},
+						},
+					},
+				},
+			})
 		}
 	}
 
@@ -262,33 +281,67 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(args) > 0 {
-		spec["args"] = args
+		configSection["arguments"] = args
 	}
 	if len(envVars) > 0 {
-		spec["env"] = envVars
+		configSection["env"] = envVars
 	}
 
 	sa := r.FormValue("service-account")
+	runAsRoot := r.FormValue("run-as-root")
+	runtimeSecurity := map[string]any{}
 	if sa != "" {
-		spec["serviceAccountName"] = sa
+		runtimeSecurity["serviceAccountName"] = sa
+	}
+	if runAsRoot == "on" {
+		runtimeSecurity["securityContext"] = map[string]any{
+			"runAsNonRoot": false,
+		}
+	}
+	if len(runtimeSecurity) > 0 {
+		spec["runtime"] = map[string]any{"security": runtimeSecurity}
 	}
 
 	// ConfigMap support: create from content or reference existing
 	configMapRef := r.FormValue("configmap-ref")
 	configMapContent := r.FormValue("configmap-content")
 	if configMapRef != "" {
-		spec["configMapRef"] = map[string]any{"name": configMapRef}
+		mountPath := "/etc/mcp-config"
+		if entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 && entry.K8s().ConfigMaps[0].MountPath != "" {
+			mountPath = entry.K8s().ConfigMaps[0].MountPath
+		}
+		storageEntries = append(storageEntries, map[string]any{
+			"path": mountPath,
+			"source": map[string]any{
+				"type":      "ConfigMap",
+				"configMap": map[string]any{"name": configMapRef},
+			},
+		})
 	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
 		cmName := instanceName + "-config"
 		fileName := entry.K8s().ConfigMaps[0].FileName
 		if fileName == "" {
 			fileName = "config"
 		}
+		mountPath := entry.K8s().ConfigMaps[0].MountPath
+		if mountPath == "" {
+			mountPath = "/etc/mcp-config"
+		}
 		pendingConfigMaps = append(pendingConfigMaps, pendingConfigMap{
 			name: cmName,
 			data: map[string]string{fileName: configMapContent},
 		})
-		spec["configMapRef"] = map[string]any{"name": cmName}
+		storageEntries = append(storageEntries, map[string]any{
+			"path": mountPath,
+			"source": map[string]any{
+				"type":      "ConfigMap",
+				"configMap": map[string]any{"name": cmName},
+			},
+		})
+	}
+
+	if len(storageEntries) > 0 {
+		configSection["storage"] = storageEntries
 	}
 
 	// Create the MCPServer CR first to get its UID for ownerReferences
@@ -361,6 +414,23 @@ func (h *Handler) QuickDeploy(w http.ResponseWriter, r *http.Request) {
 	instanceName := entry.Name
 	ctx := r.Context()
 
+	// If the catalog entry requires root, inject securityContext override
+	if k8s := entry.K8s(); k8s != nil && k8s.RunAsRoot {
+		runtimeMap, _ := spec["runtime"].(map[string]any)
+		if runtimeMap == nil {
+			runtimeMap = map[string]any{}
+			spec["runtime"] = runtimeMap
+		}
+		securityMap, _ := runtimeMap["security"].(map[string]any)
+		if securityMap == nil {
+			securityMap = map[string]any{}
+			runtimeMap["security"] = securityMap
+		}
+		securityMap["securityContext"] = map[string]any{
+			"runAsNonRoot": false,
+		}
+	}
+
 	// Pre-wire configMapRef names (resources created after the CR for ownerReferences)
 	type pendingConfigMap struct {
 		name     string
@@ -378,8 +448,26 @@ func (h *Handler) QuickDeploy(w http.ResponseWriter, r *http.Request) {
 			if fileName == "" {
 				fileName = "config"
 			}
+			mountPath := cm.MountPath
+			if mountPath == "" {
+				mountPath = "/etc/mcp-config"
+			}
 			pendingCMs = append(pendingCMs, pendingConfigMap{name: cmName, fileName: fileName, content: cm.DefaultContent})
-			spec["configMapRef"] = map[string]any{"name": cmName}
+			// Navigate into spec.config.storage to append the ConfigMap entry
+			configMap, _ := spec["config"].(map[string]any)
+			if configMap == nil {
+				configMap = map[string]any{}
+				spec["config"] = configMap
+			}
+			storageSlice, _ := configMap["storage"].([]any)
+			storageSlice = append(storageSlice, map[string]any{
+				"path": mountPath,
+				"source": map[string]any{
+					"type":      "ConfigMap",
+					"configMap": map[string]any{"name": cmName},
+				},
+			})
+			configMap["storage"] = storageSlice
 		}
 	}
 
@@ -444,8 +532,8 @@ func (h *Handler) Running(w http.ResponseWriter, r *http.Request) {
 		if phase == "" {
 			phase = "Pending"
 		}
-		image, _, _ := unstructured.NestedString(item.Object, "spec", "image")
-		port, _, _ := unstructured.NestedInt64(item.Object, "spec", "port")
+		image, _, _ := unstructured.NestedString(item.Object, "spec", "source", "containerImage", "ref")
+		port, _, _ := unstructured.NestedInt64(item.Object, "spec", "config", "port")
 
 		endpoint, _, _ := unstructured.NestedString(item.Object, "status", "address", "url")
 
@@ -616,25 +704,17 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 	fmt.Fprintf(&b, "  name: %s\n", instanceName)
 	fmt.Fprintf(&b, "  namespace: %s\n", ns)
 	b.WriteString("spec:\n")
-	fmt.Fprintf(&b, "  image: %s\n", image)
-	fmt.Fprintf(&b, "  port: %s\n", port)
 
-	// Service account
-	sa := r.FormValue("service-account")
-	if sa != "" {
-		fmt.Fprintf(&b, "  serviceAccountName: %s\n", sa)
-	}
+	// Source
+	b.WriteString("  source:\n")
+	b.WriteString("    type: ContainerImage\n")
+	b.WriteString("    containerImage:\n")
+	fmt.Fprintf(&b, "      ref: %s\n", image)
 
-	// ConfigMap ref
-	configMapRef := r.FormValue("configmap-ref")
-	configMapContent := r.FormValue("configmap-content")
-	if configMapRef != "" {
-		b.WriteString("  configMapRef:\n")
-		fmt.Fprintf(&b, "    name: %s\n", configMapRef)
-	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
-		b.WriteString("  configMapRef:\n")
-		fmt.Fprintf(&b, "    name: %s-config\n", instanceName)
-	}
+	// Config
+	b.WriteString("  config:\n")
+	fmt.Fprintf(&b, "    port: %s\n", port)
+	b.WriteString("    path: /mcp\n")
 
 	// Args: fixed args from package + user-provided args
 	var args []string
@@ -659,23 +739,9 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 		}
 	}
 	if len(args) > 0 {
-		b.WriteString("  args:\n")
+		b.WriteString("    arguments:\n")
 		for _, a := range args {
-			fmt.Fprintf(&b, "    - %s\n", a)
-		}
-	}
-
-	// Secret file mounts
-	if k8s := entry.K8s(); k8s != nil {
-		for _, sm := range k8s.SecretMounts {
-			content := r.FormValue("file-" + sm.SecretKey)
-			if content != "" {
-				secretName := instanceName + "-" + strings.TrimSuffix(sm.SecretKey, ".pem") + "-secret"
-				b.WriteString("  secretRef:\n")
-				fmt.Fprintf(&b, "    name: %s\n", secretName)
-				fmt.Fprintf(&b, "  secretMountPath: %s\n", sm.MountPath)
-				fmt.Fprintf(&b, "  secretKey: %s\n", sm.SecretKey)
-			}
+			fmt.Fprintf(&b, "      - %s\n", a)
 		}
 	}
 
@@ -686,16 +752,90 @@ func buildYAMLPreview(r *http.Request, entry *catalog.ServerEntry, namespace str
 			value := r.FormValue("env-" + ev.Name)
 			if value != "" {
 				if !hasEnvVars {
-					b.WriteString("  env:\n")
+					b.WriteString("    env:\n")
 					hasEnvVars = true
 				}
 				credSecretName := instanceName + "-credentials"
-				fmt.Fprintf(&b, "    - name: %s\n", ev.Name)
-				b.WriteString("      valueFrom:\n")
-				b.WriteString("        secretKeyRef:\n")
-				fmt.Fprintf(&b, "          name: %s\n", credSecretName)
-				fmt.Fprintf(&b, "          key: %s\n", sanitizeKey(ev.Name))
+				fmt.Fprintf(&b, "      - name: %s\n", ev.Name)
+				b.WriteString("        valueFrom:\n")
+				b.WriteString("          secretKeyRef:\n")
+				fmt.Fprintf(&b, "            name: %s\n", credSecretName)
+				fmt.Fprintf(&b, "            key: %s\n", sanitizeKey(ev.Name))
 			}
+		}
+	}
+
+	// Storage entries
+	var storageEntries []string
+
+	// Secret file mounts
+	if k8s := entry.K8s(); k8s != nil {
+		for _, sm := range k8s.SecretMounts {
+			content := r.FormValue("file-" + sm.SecretKey)
+			if content != "" {
+				secretName := instanceName + "-" + strings.TrimSuffix(sm.SecretKey, ".pem") + "-secret"
+				var se strings.Builder
+				fmt.Fprintf(&se, "      - path: %s\n", sm.MountPath)
+				se.WriteString("        source:\n")
+				se.WriteString("          type: Secret\n")
+				se.WriteString("          secret:\n")
+				fmt.Fprintf(&se, "            secretName: %s\n", secretName)
+				se.WriteString("            items:\n")
+				fmt.Fprintf(&se, "              - key: %s\n", sm.SecretKey)
+				fmt.Fprintf(&se, "                path: %s\n", sm.SecretKey)
+				storageEntries = append(storageEntries, se.String())
+			}
+		}
+	}
+
+	// ConfigMap ref
+	configMapRef := r.FormValue("configmap-ref")
+	configMapContent := r.FormValue("configmap-content")
+	if configMapRef != "" {
+		mountPath := "/etc/mcp-config"
+		if entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 && entry.K8s().ConfigMaps[0].MountPath != "" {
+			mountPath = entry.K8s().ConfigMaps[0].MountPath
+		}
+		var se strings.Builder
+		fmt.Fprintf(&se, "      - path: %s\n", mountPath)
+		se.WriteString("        source:\n")
+		se.WriteString("          type: ConfigMap\n")
+		se.WriteString("          configMap:\n")
+		fmt.Fprintf(&se, "            name: %s\n", configMapRef)
+		storageEntries = append(storageEntries, se.String())
+	} else if configMapContent != "" && entry.K8s() != nil && len(entry.K8s().ConfigMaps) > 0 {
+		mountPath := entry.K8s().ConfigMaps[0].MountPath
+		if mountPath == "" {
+			mountPath = "/etc/mcp-config"
+		}
+		var se strings.Builder
+		fmt.Fprintf(&se, "      - path: %s\n", mountPath)
+		se.WriteString("        source:\n")
+		se.WriteString("          type: ConfigMap\n")
+		se.WriteString("          configMap:\n")
+		fmt.Fprintf(&se, "            name: %s-config\n", instanceName)
+		storageEntries = append(storageEntries, se.String())
+	}
+
+	if len(storageEntries) > 0 {
+		b.WriteString("    storage:\n")
+		for _, se := range storageEntries {
+			b.WriteString(se)
+		}
+	}
+
+	// Runtime
+	sa := r.FormValue("service-account")
+	runAsRoot := r.FormValue("run-as-root")
+	if sa != "" || runAsRoot == "on" {
+		b.WriteString("  runtime:\n")
+		b.WriteString("    security:\n")
+		if sa != "" {
+			fmt.Fprintf(&b, "      serviceAccountName: %s\n", sa)
+		}
+		if runAsRoot == "on" {
+			b.WriteString("      securityContext:\n")
+			b.WriteString("        runAsNonRoot: false\n")
 		}
 	}
 
