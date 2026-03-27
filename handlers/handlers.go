@@ -32,7 +32,7 @@ var httpRouteGVR = schema.GroupVersionResource{
 }
 
 var mcpServerRegistrationGVR = schema.GroupVersionResource{
-	Group:    "mcp.kuadrant.io",
+	Group:    "mcp.kagenti.com",
 	Version:  "v1alpha1",
 	Resource: "mcpserverregistrations",
 }
@@ -790,7 +790,7 @@ func (h *Handler) createHTTPRoute(ctx context.Context, namespace, name string, p
 func (h *Handler) createMCPServerRegistration(ctx context.Context, namespace, name string, ownerRef metav1.OwnerReference) error {
 	reg := &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": "mcp.kuadrant.io/v1alpha1",
+			"apiVersion": "mcp.kagenti.com/v1alpha1",
 			"kind":       "MCPServerRegistration",
 			"metadata": map[string]any{
 				"name":      name,

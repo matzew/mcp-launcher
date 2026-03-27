@@ -53,7 +53,7 @@ rules:
     resources: ["httproutes"]
     verbs: ["create", "delete", "list"]
   # Create/delete MCPServerRegistrations for mcp-gateway integration
-  - apiGroups: ["mcp.kuadrant.io"]
+  - apiGroups: ["mcp.kagenti.com"]
     resources: ["mcpserverregistrations"]
     verbs: ["create", "delete", "list"]
   # List service accounts and namespaces for dropdowns
