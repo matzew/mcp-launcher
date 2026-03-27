@@ -100,12 +100,6 @@ spec:
               value: mcp-catalog
             - name: TARGET_NAMESPACE
               value: default
-            - name: MCP_GATEWAY_ENABLED
-              value: "true"
-            - name: MCP_GATEWAY_NAME
-              value: mcp-gateway
-            - name: MCP_GATEWAY_NAMESPACE
-              value: gateway-system
           livenessProbe:
             httpGet:
               path: /
@@ -183,7 +177,7 @@ data:
           }
         ]
       }],
-      "_meta": { "io.openshift/k8s": { "defaultPort": 3000 } }
+      "_meta": { "io.openshift/k8s": { "defaultPort": 3000, "runAsRoot": true } }
     }
 ---
 apiVersion: v1
@@ -208,8 +202,16 @@ data:
       "_meta": { "io.openshift/k8s": {
         "defaultPort": 3001,
         "crTemplate": {
-          "image": "quay.io/matzew/mcp-everything:latest",
-          "port": 3001
+          "source": {
+            "type": "ContainerImage",
+            "containerImage": {
+              "ref": "quay.io/matzew/mcp-everything:latest"
+            }
+          },
+          "config": {
+            "port": 3001,
+            "path": "/mcp"
+          }
         }
       } }
     }
@@ -253,7 +255,7 @@ data:
           }
         ]
       }],
-      "_meta": { "io.openshift/k8s": { "defaultPort": 8000 } }
+      "_meta": { "io.openshift/k8s": { "defaultPort": 8000, "runAsRoot": true } }
     }
 ---
 # ServiceAccount for read-only Kubernetes access (used by the MCP server pod)
@@ -316,14 +318,27 @@ data:
             "label": "Server Configuration (config.toml)",
             "description": "TOML config file mounted at /etc/mcp-config/config.toml",
             "defaultContent": "# Kubernetes MCP Server Configuration\nlog_level = 5\nport = \"8080\"\nread_only = true\ntoolsets = [\"core\", \"config\"]\n",
-            "fileName": "config.toml"
+            "fileName": "config.toml",
+            "mountPath": "/etc/mcp-config"
           }
         ],
         "crTemplate": {
-          "image": "quay.io/containers/kubernetes_mcp_server:latest",
-          "port": 8080,
-          "args": ["--config", "/etc/mcp-config/config.toml"],
-          "serviceAccountName": "mcp-viewer"
+          "source": {
+            "type": "ContainerImage",
+            "containerImage": {
+              "ref": "quay.io/containers/kubernetes_mcp_server:latest"
+            }
+          },
+          "config": {
+            "port": 8080,
+            "path": "/mcp",
+            "arguments": ["--config", "/etc/mcp-config/config.toml"]
+          },
+          "runtime": {
+            "security": {
+              "serviceAccountName": "mcp-viewer"
+            }
+          }
         }
       } }
     }
@@ -358,6 +373,7 @@ data:
       }],
       "_meta": { "io.openshift/k8s": {
         "defaultPort": 8080,
+        "runAsRoot": true,
         "secretMounts": [
           {
             "secretKey": "ca.pem",
