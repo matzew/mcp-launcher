@@ -25,6 +25,25 @@ var mcpServerGVR = schema.GroupVersionResource{
 	Resource: "mcpservers",
 }
 
+var httpRouteGVR = schema.GroupVersionResource{
+	Group:    "gateway.networking.k8s.io",
+	Version:  "v1",
+	Resource: "httproutes",
+}
+
+var mcpServerRegistrationGVR = schema.GroupVersionResource{
+	Group:    "mcp.kuadrant.io",
+	Version:  "v1alpha1",
+	Resource: "mcpserverregistrations",
+}
+
+// GatewayConfig holds mcp-gateway integration settings.
+type GatewayConfig struct {
+	Enabled          bool
+	GatewayName      string
+	GatewayNamespace string
+}
+
 // Handler holds dependencies for HTTP handlers.
 type Handler struct {
 	catalog         *catalog.Store
@@ -32,6 +51,7 @@ type Handler struct {
 	dynamicClient   dynamic.Interface
 	targetNamespace string
 	templateDir     string
+	gateway         GatewayConfig
 }
 
 // New creates a new Handler.
@@ -40,6 +60,7 @@ func New(
 	clientset kubernetes.Interface,
 	dynamicClient dynamic.Interface,
 	targetNamespace string,
+	gateway GatewayConfig,
 ) *Handler {
 	return &Handler{
 		catalog:         catalogStore,
@@ -47,6 +68,7 @@ func New(
 		dynamicClient:   dynamicClient,
 		targetNamespace: targetNamespace,
 		templateDir:     "templates",
+		gateway:         gateway,
 	}
 }
 
@@ -383,6 +405,20 @@ func (h *Handler) Run(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Create gateway resources if mcp-gateway integration is enabled
+	if h.gateway.Enabled {
+		mcpPort, _, _ := unstructured.NestedInt64(created.Object, "spec", "config", "port")
+		if mcpPort <= 0 {
+			mcpPort = 8080
+		}
+		if err := h.createHTTPRoute(ctx, namespace, instanceName, mcpPort, ownerRef); err != nil {
+			log.Printf("failed to create HTTPRoute: %v", err)
+		}
+		if err := h.createMCPServerRegistration(ctx, namespace, instanceName, ownerRef); err != nil {
+			log.Printf("failed to create MCPServerRegistration: %v", err)
+		}
+	}
+
 	http.Redirect(w, r, "/running", http.StatusSeeOther)
 }
 
@@ -502,6 +538,20 @@ func (h *Handler) QuickDeploy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Create gateway resources if mcp-gateway integration is enabled
+	if h.gateway.Enabled {
+		mcpPort, _, _ := unstructured.NestedInt64(created.Object, "spec", "config", "port")
+		if mcpPort <= 0 {
+			mcpPort = 8080
+		}
+		if err := h.createHTTPRoute(ctx, namespace, instanceName, mcpPort, ownerRef); err != nil {
+			log.Printf("failed to create HTTPRoute: %v", err)
+		}
+		if err := h.createMCPServerRegistration(ctx, namespace, instanceName, ownerRef); err != nil {
+			log.Printf("failed to create MCPServerRegistration: %v", err)
+		}
+	}
+
 	http.Redirect(w, r, "/running", http.StatusSeeOther)
 }
 
@@ -608,6 +658,31 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Clean up gateway resources (safety net — ownerReferences handle the common case)
+	if h.gateway.Enabled {
+		routes, err := h.dynamicClient.Resource(httpRouteGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: managedLabel,
+		})
+		if err == nil {
+			for _, r := range routes.Items {
+				if r.GetName() == name {
+					_ = h.dynamicClient.Resource(httpRouteGVR).Namespace(namespace).Delete(ctx, r.GetName(), metav1.DeleteOptions{})
+				}
+			}
+		}
+
+		regs, err := h.dynamicClient.Resource(mcpServerRegistrationGVR).Namespace(namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: managedLabel,
+		})
+		if err == nil {
+			for _, r := range regs.Items {
+				if r.GetName() == name {
+					_ = h.dynamicClient.Resource(mcpServerRegistrationGVR).Namespace(namespace).Delete(ctx, r.GetName(), metav1.DeleteOptions{})
+				}
+			}
+		}
+	}
+
 	// Delete the MCPServer CR itself
 	err = h.dynamicClient.Resource(mcpServerGVR).Namespace(namespace).Delete(
 		ctx, name, metav1.DeleteOptions{},
@@ -658,6 +733,91 @@ func (h *Handler) createConfigMap(ctx context.Context, namespace, name string, d
 		Data: data,
 	}
 	_, err := h.clientset.CoreV1().ConfigMaps(namespace).Create(ctx, cm, metav1.CreateOptions{})
+	return err
+}
+
+func toolPrefix(name string) string {
+	return strings.ReplaceAll(name, "-", "_") + "_"
+}
+
+func (h *Handler) createHTTPRoute(ctx context.Context, namespace, name string, port int64, ownerRef metav1.OwnerReference) error {
+	route := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "gateway.networking.k8s.io/v1",
+			"kind":       "HTTPRoute",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": namespace,
+				"labels": map[string]any{
+					"app.kubernetes.io/managed-by": "mcp-launcher",
+				},
+				"ownerReferences": []any{
+					map[string]any{
+						"apiVersion": ownerRef.APIVersion,
+						"kind":       ownerRef.Kind,
+						"name":       ownerRef.Name,
+						"uid":        string(ownerRef.UID),
+					},
+				},
+			},
+			"spec": map[string]any{
+				"hostnames": []any{
+					name + ".mcp.local",
+				},
+				"parentRefs": []any{
+					map[string]any{
+						"name":      h.gateway.GatewayName,
+						"namespace": h.gateway.GatewayNamespace,
+					},
+				},
+				"rules": []any{
+					map[string]any{
+						"backendRefs": []any{
+							map[string]any{
+								"name": name,
+								"port": port,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	_, err := h.dynamicClient.Resource(httpRouteGVR).Namespace(namespace).Create(ctx, route, metav1.CreateOptions{})
+	return err
+}
+
+func (h *Handler) createMCPServerRegistration(ctx context.Context, namespace, name string, ownerRef metav1.OwnerReference) error {
+	reg := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "mcp.kuadrant.io/v1alpha1",
+			"kind":       "MCPServerRegistration",
+			"metadata": map[string]any{
+				"name":      name,
+				"namespace": namespace,
+				"labels": map[string]any{
+					"app.kubernetes.io/managed-by": "mcp-launcher",
+				},
+				"ownerReferences": []any{
+					map[string]any{
+						"apiVersion": ownerRef.APIVersion,
+						"kind":       ownerRef.Kind,
+						"name":       ownerRef.Name,
+						"uid":        string(ownerRef.UID),
+					},
+				},
+			},
+			"spec": map[string]any{
+				"toolPrefix": toolPrefix(name),
+				"targetRef": map[string]any{
+					"group": "gateway.networking.k8s.io",
+					"kind":  "HTTPRoute",
+					"name":  name,
+				},
+			},
+		},
+	}
+	_, err := h.dynamicClient.Resource(mcpServerRegistrationGVR).Namespace(namespace).Create(ctx, reg, metav1.CreateOptions{})
 	return err
 }
 
