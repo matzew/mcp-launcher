@@ -737,7 +737,14 @@ func (h *Handler) createConfigMap(ctx context.Context, namespace, name string, d
 }
 
 func toolPrefix(name string) string {
-	return strings.ReplaceAll(name, "-", "_") + "_"
+	s := name
+	for _, suffix := range []string{"-mcp-server", "-server", "-mcp"} {
+		if strings.HasSuffix(s, suffix) {
+			s = strings.TrimSuffix(s, suffix)
+			break
+		}
+	}
+	return strings.ReplaceAll(s, "-", "_") + "_"
 }
 
 func (h *Handler) createHTTPRoute(ctx context.Context, namespace, name string, port int64, ownerRef metav1.OwnerReference) error {
