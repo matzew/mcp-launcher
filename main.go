@@ -34,8 +34,14 @@ func main() {
 		log.Fatalf("Failed to create dynamic client: %v", err)
 	}
 
+	gwCfg := handlers.GatewayConfig{
+		Enabled:          envOr("MCP_GATEWAY_ENABLED", "true") != "false",
+		GatewayName:      envOr("MCP_GATEWAY_NAME", "mcp-gateway"),
+		GatewayNamespace: envOr("MCP_GATEWAY_NAMESPACE", "gateway-system"),
+	}
+
 	store := catalog.NewStore(clientset, catalogNamespace)
-	h := handlers.New(store, clientset, dynClient, targetNamespace)
+	h := handlers.New(store, clientset, dynClient, targetNamespace, gwCfg)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", h.Catalog)

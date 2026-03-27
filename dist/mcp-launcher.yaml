@@ -48,6 +48,14 @@ rules:
   - apiGroups: ["mcp.x-k8s.io"]
     resources: ["mcpservers"]
     verbs: ["get", "list", "watch", "create", "update", "delete"]
+  # Create/delete HTTPRoutes for mcp-gateway integration
+  - apiGroups: ["gateway.networking.k8s.io"]
+    resources: ["httproutes"]
+    verbs: ["create", "delete", "list"]
+  # Create/delete MCPServerRegistrations for mcp-gateway integration
+  - apiGroups: ["mcp.kagenti.com"]
+    resources: ["mcpserverregistrations"]
+    verbs: ["create", "delete", "list"]
   # List service accounts and namespaces for dropdowns
   - apiGroups: [""]
     resources: ["serviceaccounts"]

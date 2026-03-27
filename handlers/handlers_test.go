@@ -70,7 +70,7 @@ func setupHandler(t *testing.T, catalogEntries []*corev1.ConfigMap, dynObjects .
 
 	dynClient := newDynamicClient(dynObjects...)
 	store := catalog.NewStore(client, "catalog-ns")
-	h := New(store, client, dynClient, "default")
+	h := New(store, client, dynClient, "default", GatewayConfig{})
 	h.templateDir = "../templates"
 	return h
 }
