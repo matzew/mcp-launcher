@@ -100,6 +100,12 @@ spec:
               value: mcp-catalog
             - name: TARGET_NAMESPACE
               value: default
+            - name: MCP_GATEWAY_ENABLED
+              value: "true"
+            - name: MCP_GATEWAY_NAME
+              value: mcp-gateway
+            - name: MCP_GATEWAY_NAMESPACE
+              value: gateway-system
           livenessProbe:
             httpGet:
               path: /
