@@ -44,3 +44,16 @@ jobs:
         run: go vet ./...
       - name: Build
         run: go build -o /dev/null .
+
+  dist-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Regenerate dist
+        run: make dist
+      - name: Check dist is up to date
+        run: |
+          if ! git diff --exit-code dist/; then
+            echo "::error::dist/mcp-launcher.yaml is out of date. Run 'make dist' and commit the result."
+            exit 1
+          fi
